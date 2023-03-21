@@ -58,3 +58,11 @@ def find_homo(gray_img, rgb_half):
 
     return matrix
 
+
+def check_result(objpoints, imgpoints, mtx, dist, rvecs, tvecs):
+    mean_error = 0
+    for i in range(len(objpoints)):
+        imgpoints2, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
+        error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)/len(imgpoints2)
+        mean_error += error
+    print(f"total error: {mean_error/len(objpoints)}")
