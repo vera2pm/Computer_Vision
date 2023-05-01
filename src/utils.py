@@ -13,18 +13,21 @@ def find_keypoints(img):
     return keypoints, des
 
 
-def draw_matches(gray_img, keypoints1, rgb_half, keypoints2, good, matchesMask):
+def draw_matches(gray_img, keypoints1, rgb_half, keypoints2, good_matches, matchesMask, draw_subset):
+    if draw_subset:
+        good_matches = good_matches[:100]
+        matchesMask = matchesMask[:100]
     draw_params = dict(matchColor=(0, 255, 0),  # draw matches in green color
                        singlePointColor=None,
                        matchesMask=matchesMask,  # draw only inliers
                        flags=2)
-    imag_matches = cv2.drawMatches(gray_img, keypoints1, rgb_half, keypoints2, good, None, **draw_params)
+    imag_matches = cv2.drawMatches(gray_img, keypoints1, rgb_half, keypoints2, good_matches, None, **draw_params)
     plt.figure(figsize=(15, 7))
     plt.imshow(imag_matches, 'gray')
     plt.show()
 
 
-def find_homo(gray_img, rgb_half):
+def find_homo(gray_img, rgb_half, limit_dist=0.2, draw_subset=False):
 
     keypoints1, des1 = find_keypoints(gray_img)
     keypoints2, des2 = find_keypoints(rgb_half)
@@ -37,7 +40,7 @@ def find_homo(gray_img, rgb_half):
 
     good = []
     for m, n in matches:
-        if m.distance < 0.7 * n.distance:
+        if m.distance < limit_dist * n.distance:
             good.append(m)
 
     if len(good) > MIN_MATCH_COUNT:
@@ -49,8 +52,7 @@ def find_homo(gray_img, rgb_half):
         # pts = np.float32([[0, 0], [0, h - 1], [w - 1, h - 1], [w - 1, 0]]).reshape(-1, 1, 2)
         # dst = cv2.perspectiveTransform(pts, matrix)
         # rgb_half_lines = cv2.polylines(rgb_half, [np.int32(dst)], True, 255, 3, cv2.LINE_AA)
-
-        draw_matches(gray_img, keypoints1, rgb_half, keypoints2, good, matchesMask)
+        draw_matches(gray_img, keypoints1, rgb_half, keypoints2, good, matchesMask, draw_subset)
     else:
         print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
         matchesMask = None
