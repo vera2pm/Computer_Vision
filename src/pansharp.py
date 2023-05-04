@@ -6,27 +6,22 @@ import numpy as np
 
 
 def brovey_transform(img, gray_img):
-    print(gray_img[250, 250])
+    print(gray_img.dtype)
+    print(img.dtype)
+    print(gray_img.shape)
+    print(img.shape)
+    if gray_img.dtype == np.uint8:
+        gray_img = gray_img.astype(np.float32) / 255.0
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     b, g, r = cv2.split(img)
-    print(b[250, 250])
-    print(g[250, 250])
-    print(r[250, 250])
-    # const = gray_img / (1/3*(r + g + b))
-    # print(const[250, 250])
     ml = (r + g + b) / 3
-    print(type(ml))
-    print(gray_img.shape)
-    print(ml.shape)
-    print(r.shape)
     r_out = gray_img * r / ml
     b_out = gray_img * b / ml
     g_out = gray_img * g / ml
 
-    print(b_out[250, 250])
-    print(g_out[250, 250])
-    print(r_out[250, 250])
     new_img = np.float32(cv2.merge((b_out, g_out, r_out)))
+    if new_img.dtype == np.float32:
+        new_img = (new_img * 255.0).astype(np.uint8)
     print(new_img.shape)
     return cv2.cvtColor(new_img, cv2.COLOR_BGR2RGB)
 
