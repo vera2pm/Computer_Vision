@@ -1,9 +1,25 @@
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
+import os
+from tqdm import tqdm
 
 MIN_MATCH_COUNT = 10
 FLANN_INDEX_KDTREE = 1
+
+
+def cv2_load2rgb(path):
+    img = cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
+    return img
+
+
+def plot_5images(images):
+    fig, axs = plt.subplots(1, 5, figsize=(10, 10))
+    axs = axs.flatten()
+    for img, ax in zip(images, axs):
+        ax.imshow(img)
+    plt.tight_layout()
+    plt.show()
 
 
 def find_keypoints(img):
@@ -68,3 +84,44 @@ def check_result(objpoints, imgpoints, mtx, dist, rvecs, tvecs):
         error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)/len(imgpoints2)
         mean_error += error
     print(f"total error: {mean_error/len(objpoints)}")
+
+
+def load_data(datasets_path, class_names_label, image_size):
+    """
+        Load the data:
+            - 14,034 images to train the network.
+            - 3,000 images to evaluate how accurately the network learned to classify images.
+    """
+    output = []
+
+    # Iterate through training and test sets
+    for dataset in datasets_path:
+        images = []
+        labels = []
+        print("Loading {}".format(dataset))
+        # Iterate through each folder corresponding to a category
+        for folder in os.listdir(dataset):
+            if folder not in class_names_label.keys():
+                continue
+            label = class_names_label[folder]
+
+            # Iterate through each image in our folder
+            for file in tqdm(os.listdir(os.path.join(dataset, folder))):
+                # Get the path name of the image
+                img_path = os.path.join(os.path.join(dataset, folder), file)
+
+                # Open and resize the img
+                image = cv2_load2rgb(img_path)
+                if image.shape != (150, 150, 3):
+                    print(image.shape)
+                image = cv2.resize(image, image_size)
+
+                # Append the image and its corresponding label to the output
+                images.append(image)
+                labels.append(label)
+
+        # images = np.array(images, dtype='float32')
+        # labels = np.array(labels, dtype='int32')
+        output.append((images, labels))
+
+    return output
