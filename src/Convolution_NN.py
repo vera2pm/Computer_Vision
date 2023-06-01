@@ -20,7 +20,7 @@ class CNN:
         x = self.relu(x)
         x = self.pool(x)
 
-        x = nn.flatten(x, 1)
+        x = nn.Flatten(x, 1)
         x = self.fc(x)
         x = self.relu(x)
 
