@@ -3,6 +3,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import os
 from tqdm import tqdm
+import torchvision.transforms as transforms
 
 MIN_MATCH_COUNT = 10
 FLANN_INDEX_KDTREE = 1
@@ -93,6 +94,7 @@ def load_data(datasets_path, class_names_label, image_size):
             - 3,000 images to evaluate how accurately the network learned to classify images.
     """
     output = []
+    transform = transforms.ToTensor()
 
     # Iterate through training and test sets
     for dataset in datasets_path:
@@ -121,7 +123,7 @@ def load_data(datasets_path, class_names_label, image_size):
                 labels.append(label)
 
         # images = np.array(images, dtype='float32')
-        # labels = np.array(labels, dtype='int32')
+        labels = np.array(labels, dtype='int32')
         output.append((images, labels))
 
     return output
