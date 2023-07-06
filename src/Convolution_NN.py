@@ -3,7 +3,6 @@ import torch
 import torch.optim as optim
 from torchvision.models import resnet50
 from torchvision.models.feature_extraction import create_feature_extractor
-import numpy as np
 
 torch.backends.mps.is_available()
 
@@ -132,6 +131,57 @@ def test_cnn(test_data, model, device):
         print(f"Test set accuracy = {test_acc / total * 100} % ")
 
     return model, test_acc, y_pred
+
+
+def train_val(train_data, val_data, model, device, num_epochs=50, learning_rate=0.001, weight_decay=0.1):
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    model.to(device)
+    train_val_loss_list = {"train": [], "val": []}
+    test_acc_list = {"train": [], "val": []}
+    for epoch in range(num_epochs):
+        print('Epoch {}/{}'.format(epoch+1, num_epochs))
+        print('-' * 10)
+        # Each epoch has a training and validation phase
+        for phase in ['train', 'val']:
+            if phase == 'train':
+                model.train()  # Set model to training mode
+                dataset = train_data
+            else:
+                model.eval()  # Set model to evaluate mode
+                dataset = val_data
+
+            total = 0
+            train_loss = 0
+            test_acc = 0
+            for i, (images, labels) in enumerate(dataset):
+                now_batch_size, c, h, w = images.shape
+
+                images = images.to(device)
+                labels = labels.to(device)
+
+                # Calculating the model output and the cross entropy loss
+                outputs = model(images)
+                loss = criterion(outputs, labels)
+
+                _, y_pred = torch.max(outputs.data, 1)
+
+                # Updating weights according to calculated loss
+                if phase == 'train':
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                # statistics
+                train_loss += loss.item()
+                test_acc += (y_pred == labels).sum().item()
+                total += labels.size(0)
+
+            train_val_loss_list[phase].append(train_loss / total)
+            print(f"Training loss = {train_val_loss_list[phase][-1]}")
+            test_acc_list[phase].append(test_acc / total)
+
+    return model, train_val_loss_list, test_acc_list
 
 
 if __name__ == "__main__":
