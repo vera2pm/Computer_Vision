@@ -7,7 +7,7 @@ import torch
 logging.basicConfig(level=logging.INFO,
       format='%(levelname)s - %(message)s')
 
-client = make_client('http://localhost:8080/', credentials=("Vera_Kochetkova", 'vUS7z4!8.JXfELW'))
+client = make_client('http://localhost:8080/', credentials=("Vera_Kochetkova", os.environ["PASSWORD"]))
 
 TRAIN_TASK_ID = 1
 for task_id in [1, 2]:
