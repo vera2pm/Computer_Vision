@@ -1,18 +1,15 @@
 import torch.optim as optim
 import torch
-import torchvision.transforms as transforms
 
 
 class ObjDetectAnimalDataset(torch.utils.data.Dataset):
-    def __init__(self, root, transforms):
-        self.root = root
+    def __init__(self, imgs, transforms=None):
         self.transforms = transforms
+        self.imgs = imgs
 
-    def __getitem__(self, data):
-        image, boxes, label = data
-        target = {}
-        target["boxes"] = boxes
-        target["labels"] = label
+    def __getitem__(self, idx):
+        data = self.imgs[idx]
+        image, target = data
 
         if self.transforms is not None:
             image, target = self.transforms(image, target)
