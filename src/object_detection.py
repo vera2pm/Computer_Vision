@@ -34,7 +34,7 @@ def train_detect(train_data, model, device, num_epochs=50, learning_rate=0.001, 
         model.train()
         for i, (images, targets) in enumerate(train_data):
             # Extracting images and target labels for the batch being iterated
-
+            # print(targets)
             images = list(image.to(device) for image in images)
             targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
 
