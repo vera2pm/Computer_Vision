@@ -51,8 +51,8 @@ class Resize(object):
 
 
 def main():
-    data_1 = torch.load("../data/object_detect/train_set_1_one.pt")
-    data_2 = torch.load("../data/object_detect/train_set_2_one.pt")
+    data_1 = torch.load("../data/object_detect/train_set_1.pt")
+    data_2 = torch.load("../data/object_detect/train_set_2.pt")
     train_data = data_1[:-2] + data_2[:-2]
     test_data = data_1[-2:] + data_2[-2:]
     print(len(train_data))
@@ -75,7 +75,7 @@ def main():
     transforms_train = MyCompose([Resize((760, 1140))])
     train_data = ObjDetectAnimalDataset(train_data, transforms=transforms_train)
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=5, shuffle=True, collate_fn=collate_fn)
-    model, train_loss_list = train_detect(train_loader, model, device, num_epochs=50, learning_rate=0.001, weight_decay=0.1)
+    model, train_loss_list = train_detect(train_loader, model, device, num_epochs=5, learning_rate=0.001, weight_decay=0.1)
 
 
 if __name__ == "__main__":
