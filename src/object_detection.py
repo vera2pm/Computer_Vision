@@ -1,5 +1,6 @@
 import torch.optim as optim
 import torch
+from torchmetrics.detection import MeanAveragePrecision
 
 
 class ObjDetectAnimalDataset(torch.utils.data.Dataset):
@@ -36,7 +37,9 @@ def train_detect(train_data, model, device, num_epochs=50, learning_rate=0.001, 
             # Extracting images and target labels for the batch being iterated
             # print(targets)
             images = list(image.to(device) for image in images)
-            targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+            targets = [
+                {key: v.to(device) if isinstance(v, torch.Tensor) else v for key, v in t.items()} for t in targets
+            ]
 
             # Calculating the model output and the cross entropy loss
             loss_dict = model(images, targets)
@@ -55,3 +58,23 @@ def train_detect(train_data, model, device, num_epochs=50, learning_rate=0.001, 
     return model, train_loss_list
 
 
+def eval_detect(test_data, model, device):
+    model.to(device)
+    train_loss_list = []
+    for i, (images, targets) in enumerate(test_data):
+        images = list(img.to(device) for img in images)
+
+        predictions = model(images)
+        predictions = [{k: v.to(device) for k, v in t.items()} for t in predictions]
+
+        targets = [{k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in t.items()} for t in targets]
+
+        metric = MeanAveragePrecision(iou_type="bbox")
+        metric.update(predictions, targets)
+
+        totalValLoss += totalLoss
+
+        # gather the stats from all processes
+
+    torch.set_num_threads(n_threads)
+    return model
