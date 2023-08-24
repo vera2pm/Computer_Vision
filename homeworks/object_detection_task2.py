@@ -10,44 +10,7 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 from torchvision.models.feature_extraction import get_graph_node_names
 
 from torchvision import transforms
-from torchvision.transforms import functional as F
-from src.object_detection import train_detect, ObjDetectAnimalDataset
-
-
-def collate_fn(batch):
-    return tuple(zip(*batch))
-
-class MyCompose(object):
-    def __init__(self, transforms):
-        self.transforms = transforms
-
-    def __call__(self, img, tar):
-        for t in self.transforms:
-            img, tar = t(img, tar)
-        return img, tar
-
-
-class Resize(object):
-    def __init__(self, size):
-        self.size = size
-
-    def __call__(self, image, target):
-        y_ = image.shape[1]
-        x_ = image.shape[2]
-        ysize, xsize = self.size
-        x_scale = xsize / x_
-        y_scale = ysize / y_
-        image = F.resize(image, self.size)
-        new_boxes = []
-        for box in np.array(target["boxes"]).tolist():
-            (origx, origy, origxmax, origymax) = box
-            x = (origx * x_scale)
-            y = (origy * y_scale)
-            xmax = (origxmax * x_scale)
-            ymax = (origymax * y_scale)
-            new_boxes.append([x, y, xmax, ymax])
-        target["boxes"] = torch.tensor(new_boxes, dtype=torch.float32)
-        return image, target
+from src.object_detection import train_detect, ObjDetectAnimalDataset, MyCompose, Resize, collate_fn
 
 
 def main():
