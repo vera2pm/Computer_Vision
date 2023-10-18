@@ -1,16 +1,10 @@
-import numpy as np
-import pandas as pd
-import seaborn as sns
 import torchvision.models.detection.backbone_utils
-from matplotlib import pyplot as plt
-import sys
 import torch
 from torch.utils.data import random_split
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
-from torchvision.models.feature_extraction import get_graph_node_names
+from matplotlib import pyplot as plt
 
-from torchvision import transforms
-from src.object_detection import train_detect, ObjDetectAnimalDataset, MyCompose, Resize, collate_fn
+from src.object_detection import train_detect, ObjDetectAnimalDataset, MyCompose, Resize, collate_fn, eval_detect
 
 
 def main():
@@ -39,6 +33,20 @@ def main():
     train_data = ObjDetectAnimalDataset(train_data, transforms=transforms_train)
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=5, shuffle=True, collate_fn=collate_fn)
     model, train_loss_list = train_detect(train_loader, model, device, num_epochs=5, learning_rate=0.001, weight_decay=0.1)
+
+    transforms_test = MyCompose([Resize((760, 1140))])
+    test_data_ds = ObjDetectAnimalDataset(test_data, transforms=transforms_test)
+    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=5, shuffle=False, collate_fn=collate_fn)
+
+    predictions, metric, test_loss_list = eval_detect(test_loader, model, device)
+    metric.compute()
+    fig_, ax_ = metric.plot()
+    plt.savefig('../eval_object_detection_plot.jpg')
+
+    metric.plot(test_loss_list)
+    plt.savefig('../eval_object_detection_test_loss.jpg')
+
+    torch.save(predictions, f"predictions.pt")
 
 
 if __name__ == "__main__":
