@@ -12,6 +12,10 @@ def main():
     data_2 = torch.load("../data/object_detect/train_set_2.pt")
     train_data = data_1[:-2] + data_2[:-2]
     test_data = data_1[-2:] + data_2[-2:]
+
+    data = torch.load("../whole_set_5.pt")
+    train_data = data[:-10]
+    test_data = data[-10:]
     print(len(train_data))
     print(len(test_data))
 
@@ -25,14 +29,16 @@ def main():
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
     # print(model)
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-    device = torch.device("cpu")
+    # device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {device}")
 
     transforms_train = MyCompose([Resize((760, 1140))])
     train_data = ObjDetectAnimalDataset(train_data, transforms=transforms_train)
     train_loader = torch.utils.data.DataLoader(train_data, batch_size=5, shuffle=True, collate_fn=collate_fn)
-    model, train_loss_list = train_detect(train_loader, model, device, num_epochs=5, learning_rate=0.001, weight_decay=0.1)
+    model, train_loss_list = train_detect(
+        train_loader, model, device, num_epochs=5, learning_rate=0.001, weight_decay=0.1
+    )
 
     transforms_test = MyCompose([Resize((760, 1140))])
     test_data_ds = ObjDetectAnimalDataset(test_data, transforms=transforms_test)
@@ -41,10 +47,10 @@ def main():
     predictions, metric, test_loss_list = eval_detect(test_loader, model, device)
     metric.compute()
     fig_, ax_ = metric.plot()
-    plt.savefig('../eval_object_detection_plot.jpg')
+    plt.savefig("../eval_object_detection_plot.jpg")
 
     metric.plot(test_loss_list)
-    plt.savefig('../eval_object_detection_test_loss.jpg')
+    plt.savefig("../eval_object_detection_test_loss.jpg")
 
     torch.save(predictions, f"predictions.pt")
 

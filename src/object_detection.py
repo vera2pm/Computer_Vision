@@ -33,10 +33,10 @@ class Resize(object):
         new_boxes = []
         for box in np.array(target["boxes"]).tolist():
             (origx, origy, origxmax, origymax) = box
-            x = (origx * x_scale)
-            y = (origy * y_scale)
-            xmax = (origxmax * x_scale)
-            ymax = (origymax * y_scale)
+            x = origx * x_scale
+            y = origy * y_scale
+            xmax = origxmax * x_scale
+            ymax = origymax * y_scale
             new_boxes.append([x, y, xmax, ymax])
         target["boxes"] = torch.tensor(new_boxes, dtype=torch.float32)
         return image, target
