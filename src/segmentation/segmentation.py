@@ -10,13 +10,12 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from PIL import Image
 import torchvision.transforms as transforms
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 
 from src.segmentation.unet_model import UNet
 from src.configs.segment_config import IN_CHANNELS, OUT_CHANNELS
 from src.segmentation.dice_loss import DiceLoss
 
-from skimage.io import imread, imshow
-from skimage.color import rgb2gray, label2rgb
 from skimage.feature import blob_dog, blob_log, blob_doh
 
 
@@ -32,7 +31,7 @@ class SegmentationDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         image = Image.open(self.imgs[idx])
-        mask = Image.open(self.mask[idx]).convert("L")
+        mask = Image.open(self.mask[idx])
         n_blobs = self.n_blobs[idx]
 
         if self.transforms is not None:
@@ -49,13 +48,22 @@ class SegmentationDataset(torch.utils.data.Dataset):
 
 
 def blob_detection(img, i):
-    hotdog = 255 - img
-    # hotdog = imread(img)
-    print(hotdog.shape)
-    hotdog = cv2.cvtColor(hotdog, cv2.COLOR_BGR2GRAY)
+    if type(img) == str:
+        hotdog = cv2.imread(img, cv2.IMREAD_GRAYSCALE)
+    else:
+        hotdog = img
+        hotdog = cv2.cvtColor(hotdog, cv2.COLOR_BGR2GRAY)
+    # hotdog = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    # hotdog = hotdog.astype(np.uint8)
+    # print(f"max {np.max(hotdog)}")
 
-    blobs = blob_log(hotdog, max_sigma=30, num_sigma=10, threshold=0.5)
-    # blobs = blob_dog(hotdog, max_sigma=100, threshold=0.5)
+    # hotdog = cv2.cvtColor(hotdog, cv2.COLOR_BGR2GRAY)
+    hotdog = cv2.normalize(hotdog, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    # hotdog = hotdog.astype(np.uint8)
+    print(hotdog.shape)
+
+    # blobs = blob_log(hotdog, max_sigma=30, num_sigma=10, threshold=60)
+    blobs = blob_dog(hotdog, max_sigma=100, threshold=60)
     print(len(blobs))
 
     fig, ax = plt.subplots()
@@ -68,16 +76,21 @@ def blob_detection(img, i):
     return len(blobs)
 
 
-def blob_detection_1(img):
+def blob_detection_1(img, i):
     """
     Function to detect blob in one image
     :param img:
     :return:
     """
     # Read image
-    img = cv2.imread(img, cv2.IMREAD_GRAYSCALE)
+    if type(img) == str:
+        img = cv2.imread(img, cv2.IMREAD_GRAYSCALE)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    img = img.astype(np.uint8)
     img = 255 - img
-    print(img.shape)
+    # print(img)
 
     # Set up the detector with default parameters.
     params = cv2.SimpleBlobDetector_Params()
@@ -93,22 +106,31 @@ def blob_detection_1(img):
     # Draw detected blobs as red circles.
     # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
     blank = np.zeros((1, 1))
-    blobs = cv2.drawKeypoints(img, keypoints, blank, (0, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+    blobs = cv2.drawKeypoints(img, keypoints, blank, (255, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
 
     # Show keypoints
+    fig, ax = plt.subplots()
+    ax.imshow(blobs)
+    # plt.show()
     # fig = plt.figure(figsize=(15, 5))
     # plt.imshow(blobs)
     # fig.suptitle("title")
     cv2.imwrite(f"../key_points.jpg", blobs)
+    fig.savefig(f"../data/test_ima/test_mask_{i}.jpg")
     # plt.savefig(f'../key_points.jpg')
     print("Saved file")
-    return keypoints
+    return len(keypoints)
 
 
-def train_val(loader_train, loader_valid, device, num_epochs=50, learning_rate=0.001, weight_decay=0.1):
+def train_val(
+    loader_train, loader_valid, device, num_epochs=50, learning_rate=0.001, weight_decay=0.1, model_path=None
+):
     loaders = {"train": loader_train, "valid": loader_valid}
 
-    model = UNet(in_channels=SegmentationDataset.in_channels, out_channels=SegmentationDataset.out_channels)
+    if model_path is None:
+        model = UNet(in_channels=SegmentationDataset.in_channels, out_channels=SegmentationDataset.out_channels)
+    else:
+        model = torch.load(model_path)
     model.to(device)
 
     dsc_loss = DiceLoss()
@@ -193,15 +215,17 @@ def train_val(loader_train, loader_valid, device, num_epochs=50, learning_rate=0
 
 def predict_segmentation(loader_test, device, model=None):
     if model is None:
-        model = torch.load("../model_inference.pt")
+        model = torch.load("../model_inference_50.pt")
     model.to(device)
     test_loss_list = []
     model.eval()
     dsc_loss = DiceLoss()
     metric = MeanAveragePrecision(iou_type="segm")
     n_blob_pred = []
+    n_blob_true_list = []
     for i, data in enumerate(loader_test):
         images, masks_true, n_blobs_true = data
+        n_blob_true_list.extend(n_blobs_true)
         images, masks_true = images.to(device), masks_true.to(device)
 
         masks_pred = model(images)
@@ -215,5 +239,13 @@ def predict_segmentation(loader_test, device, model=None):
         # gather the stats from all processes
         test_loss_list.append(loss)
 
+    blobs_error = mean_squared_error(n_blob_true_list, n_blob_pred)
+    print(f"RMSE blobs: {blobs_error}")
+    print(f"MAE: {mean_absolute_error(n_blob_true_list, n_blob_pred)}")
+
     # torch.set_num_threads(n_threads)
-    return n_blob_pred, metric, test_loss_list
+    return n_blob_pred, metric, test_loss_list, blobs_error
+
+
+def predict_test():
+    pass

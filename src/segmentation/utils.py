@@ -14,7 +14,7 @@ def get_mask(image, regions):
     image_mask = np.zeros(image.shape, dtype=np.uint8)
     coords_list = []
     if len(regions) == 0:
-        return 255 - image_mask
+        return image_mask
     elif len(regions) == 1:
         radius = 10
     else:
