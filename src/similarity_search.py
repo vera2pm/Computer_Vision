@@ -1,6 +1,6 @@
 import random
 from typing import List, Optional
-
+import cv2
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -16,39 +16,48 @@ from PIL import Image
 
 from online_triplet_loss.losses import batch_all_triplet_loss, _pairwise_distances
 
+data_path = "../data/Stanford_Online_Products/"
+
+
+def load_image(image_path):
+    image = Image.open(data_path + image_path)
+    return image
+
 
 class TripletDataset(torch.utils.data.Dataset):
-
     def __init__(self, data_path: str, is_train: bool = True, transform: Optional[List] = None):
-        self.data_table = pd.read_table(data_path)
-        self.imgs = self.data_table[3]
-        self.label = self.data_table[1]
-        self.super_label = self.data_table[2]
+        self.data_table = pd.read_csv(data_path)
+        self.imgs = self.data_table["path"]
+        self.label = self.data_table["class_id"]
+        self.super_label = self.data_table["super_class_id"]
         self.is_train = is_train
         # if transform is None:
         #     transform = list()
-        self.transform = transforms.Compose(transform.append(transforms.ToTensor()))
+        # transform.append(transforms.ToTensor())
+        self.transform = transforms.Compose(transform)
 
     def __getitem__(self, idx):
-        image = Image.open(self.imgs[idx])
+        image = load_image(self.imgs[idx])
         label = self.label[idx]
         super_label = self.super_label[idx]
-
         image_tensor = self.transform(image)
 
         if self.is_train:
-            positive_list = self.data_table[(self.data_table.index != idx) & (self.label == label)][3]
-            positive_image = Image.open(random.choice(positive_list))
-            negative_list = self.data_table[(self.super_label == super_label) & (self.label != label)][3]
-            negative_image = Image.open(random.choice(negative_list))
+            positive_list = self.imgs[(self.data_table.index != idx) & (self.label == label)].tolist()
+            pos_path = random.choice(positive_list)
+            positive_image = load_image(pos_path)
+            negative_list = self.imgs[(self.super_label == super_label) & (self.label != label)].tolist()
+            neg_path = random.choice(negative_list)
+            negative_image = load_image(neg_path)
 
             positive_tensor = self.transform(positive_image)
             negative_tensor = self.transform(negative_image)
 
+            # print(self.imgs[idx], pos_path, neg_path)
+
             return image_tensor, label, positive_tensor, negative_tensor
 
         else:
-
             return image_tensor, label
 
     def __len__(self):
@@ -58,7 +67,7 @@ class TripletDataset(torch.utils.data.Dataset):
 class ResnetTriplet(nn.Module):
     def __init__(self):
         super().__init__()
-        self.resnet50 = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True)
+        self.resnet50 = torchvision.models.resnet50(pretrained=True)
         num_filters = self.resnet50.fc.in_features
         self.resnet50.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 10))
         # self.Triplet_loss = nn.Sequential(nn.Linear(10, 2))
@@ -135,22 +144,28 @@ def predict(test_loader, model, device):
 
 
 def load_data():
-    train_data = "../data/Stanford_Online_Products/Ebay_train.txt"
-    test_data = "../data/Stanford_Online_Products/Ebay_test.txt"
-    transformers = [transforms.Resize((760, 1140))]
+    train_data = f"{data_path}Ebay_train_preproc.csv"
+    test_data = f"{data_path}Ebay_test_preproc.csv"
+    transformers = [transforms.Resize((400, 400)), transforms.ToTensor()]
 
     train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers)
-    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=5, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=20, shuffle=True)
 
     test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers)
-    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=5, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=20, shuffle=False)
     return train_loader, test_loader
 
 
 def main():
     model = ResnetTriplet()
 
-    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    if torch.backends.mps.is_available():
+        dev = "mps"
+    elif torch.cuda.is_available():
+        dev = "cuda"
+    else:
+        dev = "cpu"
+    device = torch.device(dev)
     print(f"device: {device}")
 
     # get data
@@ -161,3 +176,8 @@ def main():
     )
 
     predictions, pred_labels = predict(test_loader, model, device)
+
+
+if __name__ == "__main__":
+    # print(torch.backends.mps.is_available())
+    main()
