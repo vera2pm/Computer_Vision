@@ -107,21 +107,22 @@ def train_test(data_loader, model, device, num_epochs=50, learning_rate=0.001, w
                 optimizer.zero_grad()
 
                 anchor_img_emb = model(anchor_img)
+                positive_img_emb = model(positive_img)
+                negative_img_emb = model(negative_img)
+
+                loss = triplet_loss(anchor_img_emb, positive_img_emb, negative_img_emb)
 
                 if phase == "train":
-                    positive_img_emb = model(positive_img)
-                    negative_img_emb = model(negative_img)
-
-                    loss = triplet_loss(anchor_img_emb, positive_img_emb, negative_img_emb)
                     loss.backward()
                     optimizer.step()
                     train_loss += loss.item()
 
-                    # train_loss_list.append(train_loss / len(train_data))
-                    # print(f"Training loss = {train_loss_list[-1]}")
-
+                    train_loss_list.append(train_loss)  # / len(data))
+                    print(f"Training loss = {train_loss_list[-1]}")
                 else:
-                    continue
+                    print(f"Valid loss = {loss.item()}")
+
+    torch.save(model, "../similarity_model_inference.pt")
 
     return model, train_loss_list
 
@@ -149,10 +150,10 @@ def load_data():
     transformers = [transforms.Resize((400, 400)), transforms.ToTensor()]
 
     train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers)
-    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=20, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=10, shuffle=True)
 
     test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers)
-    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=20, shuffle=False)
+    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=10, shuffle=False)
     return train_loader, test_loader
 
 
@@ -174,6 +175,7 @@ def main():
     model, train_loss_list = train_test(
         train_loader, model, device, num_epochs=5, learning_rate=0.001, weight_decay=0.1
     )
+    print(train_loss_list)
 
     predictions, pred_labels = predict(test_loader, model, device)
 
