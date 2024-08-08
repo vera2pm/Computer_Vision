@@ -13,10 +13,14 @@ def preprocessing(data):
         image = Image.open("../../data/Stanford_Online_Products/" + row["path"])
         (w, h), n = image.size, image.mode
         if n != "RGB":
-            print(row["path"])
+            # print(row["path"])
             continue
         shape_df.append([row["path"], row["class_id"], row["super_class_id"], n])
     shape_df = pd.DataFrame(shape_df, columns=["path", "class_id", "super_class_id", "n"])
+    class_count = shape_df.groupby("class_id")["path"].count()
+    class_count.name = "count"
+    shape_df = shape_df.merge(class_count.reset_index(), on="class_id", how="left")
+    shape_df = shape_df.loc[shape_df["count"] != 1]
     return shape_df
 
 

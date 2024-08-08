@@ -80,7 +80,8 @@ class ResnetTriplet(nn.Module):
 
 def train_test(data_loader, model, device, num_epochs=50, learning_rate=0.001, weight_decay=0.1):
     optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
+    # triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2, eps=1e-7)
+    triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0)
     # triplet_loss = batch_all_triplet_loss()
 
     model.to(device)
@@ -115,10 +116,11 @@ def train_test(data_loader, model, device, num_epochs=50, learning_rate=0.001, w
                 if phase == "train":
                     loss.backward()
                     optimizer.step()
-                    train_loss += loss.item()
+                    train_loss = loss.item()
 
                     train_loss_list.append(train_loss)  # / len(data))
-                    print(f"Training loss = {train_loss_list[-1]}")
+                    if i % 300 == 0:
+                        print(f"Training loss = {train_loss_list[-1]}")
                 else:
                     print(f"Valid loss = {loss.item()}")
 
