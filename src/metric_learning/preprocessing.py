@@ -1,5 +1,6 @@
 from PIL import Image
 import pandas as pd
+from sklearn.model_selection import GroupShuffleSplit
 
 
 def data_cleaning():
@@ -28,6 +29,14 @@ def read_data():
     train_data = pd.read_table("../../data/Stanford_Online_Products/Ebay_train.txt", sep=" ")
     test_data = pd.read_table("../../data/Stanford_Online_Products/Ebay_test.txt", sep=" ")
     shape_df = preprocessing(train_data)
+
+    gss = GroupShuffleSplit(test_size=0.33, n_splits=1, random_state=42).split(
+        shape_df, groups=shape_df["super_class_id"]
+    )
+
+    X_train_inds, X_test_inds = next(gss)
+    shape_df.iloc[X_train_inds].to_csv("../../data/Stanford_Online_Products/Ebay_train_train_preproc.csv", index=False)
+    shape_df.iloc[X_test_inds].to_csv("../../data/Stanford_Online_Products/Ebay_train__val_preproc.csv", index=False)
     shape_df.to_csv("../../data/Stanford_Online_Products/Ebay_train_preproc.csv", index=False)
 
     shape_df = preprocessing(test_data)
