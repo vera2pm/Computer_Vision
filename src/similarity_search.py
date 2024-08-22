@@ -123,12 +123,12 @@ class ResnetTriplet(nn.Module):
     def __init__(self):
         super().__init__()
         # self.resnet50 = torchvision.models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
-        self.resnet50 = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
-        num_filters = self.resnet50.fc.in_features
-        self.resnet50.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
+        self.resnet = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        num_filters = self.resnet.fc.in_features
+        self.resnet.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
 
     def forward(self, x):
-        features = self.resnet50(x)
+        features = self.resnet(x)
         return features
 
 
@@ -238,30 +238,6 @@ class MetricLearning:
                 pred_labels.append(true_labels[pred_im_idx])
 
         return predictions, pred_labels, true_labels
-
-
-# def predict_batch(test_loader, model, device):
-#     model = model.to(device)
-#     model.eval()
-#     pred_labels = []
-#     predictions = []
-#     true_labels = []
-#     for data in test_loader:
-#         test_images, test_labels = data
-#         test_images, test_labels = test_images.to(device), test_labels.to(device)
-#
-#         test_embs = model(test_images)
-#         distances = _pairwise_distances(test_embs).to(torch.device("cpu")).detach().numpy()
-#         # print(distances)
-#         # for i, (test_img, labels) in enumerate(test_loader):
-#         for i, preds in enumerate(distances):
-#             pred_im_idx = np.argsort(preds)[1]
-#             # print(preds[pred_im_idx])
-#             true_labels.append(int(test_labels[i].to(torch.device("cpu")).detach()))
-#             pred_labels.append(int(test_labels[pred_im_idx].to(torch.device("cpu")).detach()))
-#             # predictions.append(test_images[pred_im_idx].to(torch.device("cpu")).detach().numpy())
-#
-#     return predictions, pred_labels, true_labels
 
 
 def load_data():
