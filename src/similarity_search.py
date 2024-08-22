@@ -186,7 +186,6 @@ class MetricLearning:
         return train_loss, predictions, true_labels
 
     def train_test(self, train_loader, valid_loader, num_epochs=50):
-
         self.model.to(self.device)
         train_loss_list = []
         valid_loss_list = []
@@ -231,7 +230,9 @@ class MetricLearning:
             N = predictions.shape[0]
 
             for i, pred in enumerate(predictions):
-                distances = self.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
+                distances = (
+                    self.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
+                )
 
                 pred_im_idx = np.argsort(distances)[1]
                 pred_labels.append(true_labels[pred_im_idx])
@@ -314,9 +315,7 @@ def main():
     # get data
     train_loader, valid_loader, test_loader = load_data()
 
-    train_loss_list, valid_loss_list = learning.train_test(
-        train_loader, valid_loader, num_epochs=50
-    )
+    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=50)
     print(train_loss_list)
     torch.save(learning.model, f"../{model_name}.pt")
     plot_loss(train_loss_list, valid_loss_list, model_name)
