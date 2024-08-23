@@ -1,6 +1,5 @@
 import random
 from typing import List, Optional
-import cv2
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -8,15 +7,15 @@ from matplotlib import pyplot as plt
 
 import torch
 import torch.nn as nn
-from torch.utils.data import random_split, Sampler
+from torch.utils.data import random_split
 import torch.optim as optim
 import torchvision.models.detection.backbone_utils
 from torchvision import transforms, utils
 from PIL import Image
 from sklearn.metrics import accuracy_score
 
-from online_triplet_loss.losses import batch_all_triplet_loss, _pairwise_distances
 from torchvision.models import ResNet50_Weights, ResNet18_Weights
+from tqdm import tqdm
 
 data_path = "../data/Stanford_Online_Products/"
 
@@ -33,9 +32,6 @@ class TripletDataset(torch.utils.data.Dataset):
         self.label = self.data_table["class_id"]
         self.super_label = self.data_table["super_class_id"]
         self.is_train = is_train
-        # if transform is None:
-        #     transform = list()
-        # transform.append(transforms.ToTensor())
         self.transform = transforms.Compose(transform)
 
     def __getitem__(self, idx):
@@ -57,66 +53,13 @@ class TripletDataset(torch.utils.data.Dataset):
             positive_tensor = self.transform(positive_image)
             negative_tensor = self.transform(negative_image)
 
-            return image_tensor, label, positive_tensor, negative_tensor
+            return image_tensor, label, super_label, positive_tensor, negative_tensor
 
         else:
-            return image_tensor, label
+            return image_tensor, label, super_label
 
     def __len__(self):
         return len(self.imgs)
-
-
-class CustomBatchSampler(Sampler):
-    r"""Yield a mini-batch of indices. The sampler will drop the last batch of
-            an image size bin if it is not equal to ``batch_size``
-
-    Args:
-        examples (dict): List from dataset class.
-        batch_size (int): Size of mini-batch.
-    """
-
-    def __init__(self, super_labels, labels, batch_size):
-        self.batch_size = batch_size
-        self.data = {}
-        for i, (label, super_label) in enumerate(zip(labels, super_labels)):
-            if super_label in self.data:
-                self.data[super_label].append((i, label))
-            else:
-                self.data[super_label] = [(i, label)]
-
-        self.total = 0
-        for label, indexes in self.data.items():
-            self.total += len(indexes) // self.batch_size
-
-    def __iter__(self):
-        for _, indexes_labels in self.data.items():
-            count = len(indexes_labels)
-            batch = []
-            batch_labels = {}
-            labels = []
-            last_batch = []
-
-            for i, (idx, label) in enumerate(indexes_labels):
-                batch.append(idx)
-                labels.append(label)
-                batch_labels[label] = batch_labels[label] + 1 if label in batch_labels.keys() else 1
-
-                if i == count - 1 and len(batch) < self.batch_size:
-                    length = np.ceil((self.batch_size - len(batch)) / 2) * 2
-                    batch.extend(last_batch[-length:])
-
-                if len(batch) >= self.batch_size:
-                    if np.min(list(batch_labels.values())) > 1:
-                        yield batch
-                        batch = []
-                        labels = []
-                        batch_labels = {}
-                        last_batch = batch
-                    else:
-                        continue
-
-    def __len__(self):
-        return self.total
 
 
 class ResnetTriplet(nn.Module):
@@ -150,18 +93,18 @@ class MetricLearning:
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0)
-        # self.triplet_loss = batch_all_triplet_loss()
 
     def calculate_loss(self, data_loader, phase):
         predictions = []
         true_labels = []
         train_loss = 0
-        for i, data in enumerate(data_loader):
+        for i, data in tqdm(enumerate(data_loader), desc=phase):
             # Extracting images and target labels for the batch being iterated
-            anchor_img, anchor_label, positive_img, negative_img = data
-            anchor_img, anchor_label, positive_img, negative_img = (
+            anchor_img, anchor_label, anchor_suplabel, positive_img, negative_img = data
+            anchor_img, anchor_label, anchor_suplabel, positive_img, negative_img = (
                 anchor_img.to(self.device),
                 anchor_label.to(self.device),
+                anchor_suplabel.to(self.device),
                 positive_img.to(self.device),
                 negative_img.to(self.device),
             )
@@ -217,7 +160,7 @@ class MetricLearning:
             model = self.model.to(self.device)
             model.eval()
             for i, data in enumerate(test_loader):
-                test_images, test_labels = data
+                test_images, test_labels, test_superlabels = data
                 test_images, test_labels = test_images.to(self.device), test_labels.to(self.device)
 
                 test_embs = model(test_images)
@@ -227,15 +170,14 @@ class MetricLearning:
 
             predictions = torch.cat(predictions, dim=0)
             print(predictions.shape)
-            N = predictions.shape[0]
 
             for i, pred in enumerate(predictions):
                 distances = (
                     self.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
                 )
+                pred_im_idx = np.argsort(distances)[1]  #:6]
 
-                pred_im_idx = np.argsort(distances)[1]
-                pred_labels.append(true_labels[pred_im_idx])
+                pred_labels.append(np.take(true_labels, pred_im_idx))
 
         return predictions, pred_labels, true_labels
 
@@ -244,20 +186,21 @@ def load_data():
     train_data = f"{data_path}Ebay_train_train_preproc.csv"
     valid_data = f"{data_path}Ebay_train__val_preproc.csv"
     test_data = f"{data_path}Ebay_test_preproc.csv"
-    transformers = [transforms.Resize((400, 400)), transforms.ToTensor()]
+    transformers = [
+        transforms.Resize((400, 400)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.GaussianBlur(kernel_size=(5, 9)),
+        transforms.ToTensor(),
+    ]
 
     train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers)
-    train_cb_sampler = CustomBatchSampler(train_data_ds.super_label, train_data_ds.label, batch_size=4)
-    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_sampler=train_cb_sampler)
+    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=32)
 
     valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers)
-    valid_cb_sampler = CustomBatchSampler(valid_data_ds.super_label, valid_data_ds.label, batch_size=4)
-    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_sampler=valid_cb_sampler)
+    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=32)
 
     test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers)
-    test_cb_sampler = CustomBatchSampler(test_data_ds.super_label, test_data_ds.label, batch_size=10)
     test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=20)
-    # test_loader = torch.utils.data.DataLoader(test_data_ds, batch_sampler=test_cb_sampler)
 
     return train_loader, valid_loader, test_loader
 
@@ -273,17 +216,7 @@ def plot_loss(train_loss_list, valid_loss_list, model_name):
 
 
 def main():
-    # model = ResnetTriplet()
-    #
-    # if torch.backends.mps.is_available():
-    #     dev = "mps"
-    # elif torch.cuda.is_available():
-    #     dev = "cuda"
-    # else:
-    #     dev = "cpu"
-    # device = torch.device(dev)
-    # print(f"device: {device}")
-    model_name = "model18_inference_n128_super_label"
+    model_name = "model18_inference_aug_n128"
 
     learning = MetricLearning(learning_rate=0.001, weight_decay=0.1)
     # learning = MetricLearning(learning_rate=0.001, weight_decay=0.1, model_name=model_name)
@@ -291,16 +224,16 @@ def main():
     # get data
     train_loader, valid_loader, test_loader = load_data()
 
-    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=50)
-    print(train_loss_list)
+    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=100)
+    # print(train_loss_list)
     torch.save(learning.model, f"../{model_name}.pt")
     plot_loss(train_loss_list, valid_loss_list, model_name)
 
     predictions, pred_labels, true_labels = learning.predict(test_loader)
 
     print(accuracy_score(true_labels, pred_labels))
-    print(len(true_labels))
-    print(len(pred_labels))
+    print(true_labels[:10])
+    print(pred_labels[:10])
 
 
 if __name__ == "__main__":
