@@ -1,4 +1,5 @@
 import random
+import os
 from typing import List, Optional
 import numpy as np
 import pandas as pd
@@ -26,37 +27,43 @@ def load_image(image_path):
 
 
 class TripletDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path: str, is_train: bool = True, transform: Optional[List] = None):
+    def __init__(self, data_path: str, is_train: bool = True, transform: Optional[List] = None, is_super_label: bool = False):
         self.data_table = pd.read_csv(data_path)
         self.imgs = self.data_table["path"]
         self.label = self.data_table["class_id"]
         self.super_label = self.data_table["super_class_id"]
         self.is_train = is_train
         self.transform = transforms.Compose(transform)
+        print(self.data_table.shape)
+        self.is_super_label = is_super_label
 
     def __getitem__(self, idx):
         image = load_image(self.imgs[idx])
         label = self.label[idx]
         super_label = self.super_label[idx]
         image_tensor = self.transform(image)
+        out_label = super_label if self.is_super_label else label
 
         if self.is_train:
-            positive_list = self.imgs[(self.data_table.index != idx) & (self.label == label)].tolist()
-            # positive_list = self.imgs[(self.data_table.index != idx) & (self.super_label == super_label)].tolist()
+            if self.is_super_label:
+                positive_list = self.imgs[(self.data_table.index != idx) & (self.super_label == super_label)].tolist()
+                negative_list = self.imgs[(self.super_label != super_label)].tolist()
+            else:
+                positive_list = self.imgs[(self.data_table.index != idx) & (self.label == label)].tolist()
+                negative_list = self.imgs[(self.super_label == super_label) & (self.label != label)].tolist()
+
             pos_path = random.choice(positive_list)
             positive_image = load_image(pos_path)
-            negative_list = self.imgs[(self.super_label == super_label) & (self.label != label)].tolist()
-            # negative_list = self.imgs[(self.super_label != super_label)].tolist()
             neg_path = random.choice(negative_list)
             negative_image = load_image(neg_path)
 
             positive_tensor = self.transform(positive_image)
             negative_tensor = self.transform(negative_image)
 
-            return image_tensor, label, super_label, positive_tensor, negative_tensor
+            return image_tensor, out_label, positive_tensor, negative_tensor
 
         else:
-            return image_tensor, label, super_label
+            return image_tensor, out_label
 
     def __len__(self):
         return len(self.imgs)
@@ -76,11 +83,14 @@ class ResnetTriplet(nn.Module):
 
 
 class MetricLearning:
-    def __init__(self, learning_rate, weight_decay, model_name=None):
-        if model_name is None:
-            self.model = ResnetTriplet()
+    def __init__(self, learning_rate, weight_decay, model_name):
+        self.model_path = f"../{model_name}.pt"
+        if os.path.exists(self.model_path):
+            print("Load existing model")
+            self.model = torch.load(self.model_path)
         else:
-            self.model = torch.load(f"../{model_name}.pt")
+            print("Train new model")
+            self.model = ResnetTriplet()
 
         if torch.backends.mps.is_available():
             dev = "mps"
@@ -100,15 +110,13 @@ class MetricLearning:
         train_loss = 0
         for i, data in tqdm(enumerate(data_loader), desc=phase):
             # Extracting images and target labels for the batch being iterated
-            anchor_img, anchor_label, anchor_suplabel, positive_img, negative_img = data
-            anchor_img, anchor_label, anchor_suplabel, positive_img, negative_img = (
+            anchor_img, anchor_label, positive_img, negative_img = data
+            anchor_img, anchor_label, positive_img, negative_img = (
                 anchor_img.to(self.device),
                 anchor_label.to(self.device),
-                anchor_suplabel.to(self.device),
                 positive_img.to(self.device),
                 negative_img.to(self.device),
             )
-
             self.optimizer.zero_grad()
 
             anchor_img_emb = self.model(anchor_img)
@@ -135,6 +143,7 @@ class MetricLearning:
         for epoch in range(num_epochs):
             print(f"Epoch {epoch}")
             for phase in ["train", "valid"]:
+                print(self.optimizer.param_groups[0]['lr'])
                 if phase == "train":
                     self.model.train()
                     train_loss, _, _ = self.calculate_loss(train_loader, "train")
@@ -149,6 +158,8 @@ class MetricLearning:
                         valid_loss_list.append(valid_loss / len(valid_loader))
                         print(f"Valid loss = {valid_loss_list[-1]}")
 
+            torch.save(self.model, self.model_path)
+
         return train_loss_list, valid_loss_list
 
     def predict(self, test_loader):
@@ -160,7 +171,7 @@ class MetricLearning:
             model = self.model.to(self.device)
             model.eval()
             for i, data in enumerate(test_loader):
-                test_images, test_labels, test_superlabels = data
+                test_images, test_labels = data
                 test_images, test_labels = test_images.to(self.device), test_labels.to(self.device)
 
                 test_embs = model(test_images)
@@ -187,20 +198,20 @@ def load_data():
     valid_data = f"{data_path}Ebay_train__val_preproc.csv"
     test_data = f"{data_path}Ebay_test_preproc.csv"
     transformers = [
-        transforms.Resize((400, 400)),
+        transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
-        transforms.GaussianBlur(kernel_size=(5, 9)),
+        # transforms.GaussianBlur(kernel_size=(5, 9)),
         transforms.ToTensor(),
     ]
 
-    train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers)
-    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=32)
+    train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers, is_super_label=False)
+    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=56, shuffle=True)
 
-    valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers)
-    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=32)
+    valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers, is_super_label=False)
+    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=56)
 
-    test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers)
-    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=20)
+    test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers, is_super_label=False)
+    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=40)
 
     return train_loader, valid_loader, test_loader
 
@@ -216,16 +227,14 @@ def plot_loss(train_loss_list, valid_loss_list, model_name):
 
 
 def main():
-    model_name = "model18_inference_aug_n128"
+    model_name = "model18_inference_001_wflip"
 
-    learning = MetricLearning(learning_rate=0.001, weight_decay=0.1)
-    # learning = MetricLearning(learning_rate=0.001, weight_decay=0.1, model_name=model_name)
+    learning = MetricLearning(learning_rate=0.001, weight_decay=0.1, model_name=model_name)
 
     # get data
     train_loader, valid_loader, test_loader = load_data()
 
-    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=100)
-    # print(train_loss_list)
+    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=20)
     torch.save(learning.model, f"../{model_name}.pt")
     plot_loss(train_loss_list, valid_loss_list, model_name)
 
