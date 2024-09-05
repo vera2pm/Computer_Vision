@@ -54,24 +54,21 @@ def read_data():
     test_data = pd.read_table("../../data/Stanford_Online_Products/Ebay_test.txt", sep=" ")
     # train_data = preprocessing(train_data)
 
-    X_subtrain_inds, X_subtest_inds = next(GroupShuffleSplit(test_size=0.2, n_splits=1, random_state=42).split(
-        train_data, groups=train_data["class_id"]
-    ))
+    X_subtrain_inds, X_subtest_inds = next(
+        GroupShuffleSplit(test_size=0.2, n_splits=1, random_state=42).split(train_data, groups=train_data["class_id"])
+    )
 
     gss = GroupShuffleSplit(test_size=0.33, n_splits=1, random_state=42)
-    X_train_inds, X_test_inds = next(gss.split(
-        train_data, groups=train_data["class_id"]
-    ))
+    X_train_inds, X_test_inds = next(gss.split(train_data, groups=train_data["class_id"]))
 
-    X_subtrain_inds, X_subtest_inds = next(gss.split(
-        train_data.iloc[X_subtest_inds], groups=train_data.iloc[X_subtest_inds]["class_id"]
-    ))
+    X_subtrain_inds, X_subtest_inds = next(
+        gss.split(train_data.iloc[X_subtest_inds], groups=train_data.iloc[X_subtest_inds]["class_id"])
+    )
     print(len(X_subtrain_inds), len(X_subtest_inds), len(X_train_inds), len(X_test_inds))
     print(train_data.iloc[X_subtrain_inds]["super_class_id"].nunique())
     print(train_data.iloc[X_subtest_inds]["super_class_id"].nunique())
 
-    save_data(train_data.iloc[X_subtrain_inds],
-        "../../data/Stanford_Online_Products/Ebay_subtrain_preproc.csv")
+    save_data(train_data.iloc[X_subtrain_inds], "../../data/Stanford_Online_Products/Ebay_subtrain_preproc.csv")
     save_data(train_data.iloc[X_subtest_inds], "../../data/Stanford_Online_Products/Ebay_subval_preproc.csv")
 
     save_data(train_data.iloc[X_train_inds], "../../data/Stanford_Online_Products/Ebay_train_train_preproc.csv")

@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import random_split
 import torch.optim as optim
 import torchvision.models.detection.backbone_utils
@@ -17,6 +18,8 @@ from sklearn.metrics import accuracy_score
 
 from torchvision.models import ResNet50_Weights, ResNet18_Weights
 from tqdm import tqdm
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 data_path = "../data/Stanford_Online_Products/"
 
@@ -26,8 +29,33 @@ def load_image(image_path):
     return image
 
 
+def print_embeddings(all_embeddings, all_labels):
+
+    # Reduce to 2D using PCA
+    pca = PCA(n_components=2)
+    embeddings_2d = pca.fit_transform(all_embeddings)
+
+    # Plot the 2D embeddings
+    plt.figure(figsize=(10, 10))
+    scatter = plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], c=all_labels, cmap='tab10')
+    plt.colorbar(scatter)
+    plt.title("PCA of Embeddings")
+    plt.savefig(f"../pca_embeddings.jpg")
+
+    # # Reduce to 2D using t-SNE
+    # tsne = TSNE(n_components=2, random_state=42)
+    # embeddings_2d = tsne.fit_transform(all_embeddings)
+    # plt.figure(figsize=(10, 10))
+    # scatter = plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], c=all_labels, cmap='tab10')
+    # plt.colorbar(scatter)
+    # plt.title("t-SNE of Embeddings")
+    # plt.savefig(f"../tsne_embeddings.jpg")
+
+
 class TripletDataset(torch.utils.data.Dataset):
-    def __init__(self, data_path: str, is_train: bool = True, transform: Optional[List] = None, is_super_label: bool = False):
+    def __init__(
+        self, data_path: str, is_train: bool = True, transform: Optional[List] = None, is_super_label: bool = False
+    ):
         self.data_table = pd.read_csv(data_path)
         self.imgs = self.data_table["path"]
         self.label = self.data_table["class_id"]
@@ -41,6 +69,7 @@ class TripletDataset(torch.utils.data.Dataset):
         image = load_image(self.imgs[idx])
         label = self.label[idx]
         super_label = self.super_label[idx]
+        # print(self.imgs[idx])
         image_tensor = self.transform(image)
         out_label = super_label if self.is_super_label else label
 
@@ -48,6 +77,8 @@ class TripletDataset(torch.utils.data.Dataset):
             if self.is_super_label:
                 positive_list = self.imgs[(self.data_table.index != idx) & (self.super_label == super_label)].tolist()
                 negative_list = self.imgs[(self.super_label != super_label)].tolist()
+                # positive_image = load_image(self.data_table["pos_list_sup"][idx])
+                # negative_image = load_image(self.data_table["neg_list_sup"][idx])
             else:
                 positive_list = self.imgs[(self.data_table.index != idx) & (self.label == label)].tolist()
                 negative_list = self.imgs[(self.super_label == super_label) & (self.label != label)].tolist()
@@ -56,6 +87,7 @@ class TripletDataset(torch.utils.data.Dataset):
             positive_image = load_image(pos_path)
             neg_path = random.choice(negative_list)
             negative_image = load_image(neg_path)
+            # print(pos_path, neg_path)
 
             positive_tensor = self.transform(positive_image)
             negative_tensor = self.transform(negative_image)
@@ -72,13 +104,14 @@ class TripletDataset(torch.utils.data.Dataset):
 class ResnetTriplet(nn.Module):
     def __init__(self):
         super().__init__()
-        # self.resnet50 = torchvision.models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
+        # self.resnet = torchvision.models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
         self.resnet = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         num_filters = self.resnet.fc.in_features
-        self.resnet.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
+        self.resnet.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.BatchNorm1d(512), nn.Linear(512, 128))
 
     def forward(self, x):
         features = self.resnet(x)
+        features = F.normalize(features, p=2, dim=1)
         return features
 
 
@@ -102,13 +135,15 @@ class MetricLearning:
         print(f"device: {self.device}")
 
         self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0)
+        self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
 
     def calculate_loss(self, data_loader, phase):
         predictions = []
         true_labels = []
+        n_labels = []
         train_loss = 0
-        for i, data in tqdm(enumerate(data_loader), desc=phase):
+        # for i, data in tqdm(enumerate(data_loader), desc=phase):
+        for i, data in enumerate(data_loader):
             # Extracting images and target labels for the batch being iterated
             anchor_img, anchor_label, positive_img, negative_img = data
             anchor_img, anchor_label, positive_img, negative_img = (
@@ -124,6 +159,9 @@ class MetricLearning:
             negative_img_emb = self.model(negative_img)
 
             loss = self.triplet_loss(anchor_img_emb, positive_img_emb, negative_img_emb)
+            # # print(loss.item())
+            # if phase == "valid":
+            #     print(loss.item())
             train_loss += loss.item()
 
             if phase == "train":
@@ -131,8 +169,11 @@ class MetricLearning:
                 self.optimizer.step()
             true_labels.extend(anchor_label.to(torch.device("cpu")).detach().numpy())
             predictions.append(anchor_img_emb)
+            n_labels.append(len(set(anchor_label.to(torch.device("cpu")).detach().numpy())))
 
         predictions = torch.cat(predictions, dim=0).to(torch.device("cpu")).detach().numpy()
+        # print(f" mean number of classes per batch {np.mean(n_labels)}")
+        # print(f" median number of classes per batch {np.median(n_labels)}")
 
         return train_loss, predictions, true_labels
 
@@ -143,10 +184,9 @@ class MetricLearning:
         for epoch in range(num_epochs):
             print(f"Epoch {epoch}")
             for phase in ["train", "valid"]:
-                print(self.optimizer.param_groups[0]['lr'])
                 if phase == "train":
                     self.model.train()
-                    train_loss, _, _ = self.calculate_loss(train_loader, "train")
+                    train_loss, predictions_train, true_labels_train = self.calculate_loss(train_loader, "train")
                     train_loss_list.append(train_loss / len(train_loader))
                     print(f"Training loss = {train_loss_list[-1]}")
                 else:
@@ -159,6 +199,7 @@ class MetricLearning:
                         print(f"Valid loss = {valid_loss_list[-1]}")
 
             torch.save(self.model, self.model_path)
+        print_embeddings(predictions_train, true_labels_train)
 
         return train_loss_list, valid_loss_list
 
@@ -194,9 +235,9 @@ class MetricLearning:
 
 
 def load_data():
-    train_data = f"{data_path}Ebay_train_train_preproc.csv"
-    valid_data = f"{data_path}Ebay_train__val_preproc.csv"
-    test_data = f"{data_path}Ebay_test_preproc.csv"
+    train_data = f"{data_path}batch_train.csv"
+    valid_data = f"{data_path}batch_val.csv"
+    test_data = f"{data_path}batch_test.csv"
     transformers = [
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
@@ -204,13 +245,13 @@ def load_data():
         transforms.ToTensor(),
     ]
 
-    train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers, is_super_label=False)
+    train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers, is_super_label=True)
     train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=56, shuffle=True)
 
-    valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers, is_super_label=False)
-    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=56)
+    valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers, is_super_label=True)
+    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=56, shuffle=True)
 
-    test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers, is_super_label=False)
+    test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers, is_super_label=True)
     test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=40)
 
     return train_loader, valid_loader, test_loader
@@ -227,14 +268,14 @@ def plot_loss(train_loss_list, valid_loss_list, model_name):
 
 
 def main():
-    model_name = "model18_inference_001_wflip"
+    model_name = "model18_inference_batch_01_superlabel_batchnorm"
 
-    learning = MetricLearning(learning_rate=0.001, weight_decay=0.1, model_name=model_name)
+    learning = MetricLearning(learning_rate=0.01, weight_decay=0.1, model_name=model_name)
 
     # get data
     train_loader, valid_loader, test_loader = load_data()
 
-    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=20)
+    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=200)
     torch.save(learning.model, f"../{model_name}.pt")
     plot_loss(train_loss_list, valid_loss_list, model_name)
 
