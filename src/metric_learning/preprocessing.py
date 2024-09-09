@@ -43,9 +43,18 @@ def create_pos_neg_anchor_superlabel(data_table):
     return data_table
 
 
+def cut_batch(data_table, save_path):
+    index_list = []
+    for supcl in data_table["super_class_id"].unique():
+        index_list.extend(random.sample(data_table.loc[data_table["super_class_id"] == supcl].index.tolist(), 3))
+
+    batch = data_table.loc[index_list]
+    batch.to_csv(save_path, index=False)
+
+
 def save_data(data_table, save_path):
     shape_df = preprocessing(data_table)
-    shape_df = create_pos_neg_anchor_superlabel(shape_df)
+    # shape_df = create_pos_neg_anchor_superlabel(shape_df)
     shape_df.to_csv(save_path, index=False)
 
 
@@ -67,6 +76,10 @@ def read_data():
     print(len(X_subtrain_inds), len(X_subtest_inds), len(X_train_inds), len(X_test_inds))
     print(train_data.iloc[X_subtrain_inds]["super_class_id"].nunique())
     print(train_data.iloc[X_subtest_inds]["super_class_id"].nunique())
+
+    cut_batch(train_data.iloc[X_train_inds], "../../data/Stanford_Online_Products/batch_train.csv")
+    cut_batch(train_data.iloc[X_test_inds], "../../data/Stanford_Online_Products/batch_val.csv")
+    cut_batch(test_data, "../../data/Stanford_Online_Products/batch_test.csv")
 
     save_data(train_data.iloc[X_subtrain_inds], "../../data/Stanford_Online_Products/Ebay_subtrain_preproc.csv")
     save_data(train_data.iloc[X_subtest_inds], "../../data/Stanford_Online_Products/Ebay_subval_preproc.csv")
