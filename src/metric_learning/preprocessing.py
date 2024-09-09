@@ -77,9 +77,9 @@ def read_data():
     print(train_data.iloc[X_subtrain_inds]["super_class_id"].nunique())
     print(train_data.iloc[X_subtest_inds]["super_class_id"].nunique())
 
-    cut_batch(train_data.iloc[X_train_inds], "../../data/Stanford_Online_Products/batch_train.csv")
-    cut_batch(train_data.iloc[X_test_inds], "../../data/Stanford_Online_Products/batch_val.csv")
-    cut_batch(test_data, "../../data/Stanford_Online_Products/batch_test.csv")
+    # cut_batch(train_data.iloc[X_train_inds], "../../data/Stanford_Online_Products/batch_train.csv")
+    # cut_batch(train_data.iloc[X_test_inds], "../../data/Stanford_Online_Products/batch_val.csv")
+    # cut_batch(test_data, "../../data/Stanford_Online_Products/batch_test.csv")
 
     save_data(train_data.iloc[X_subtrain_inds], "../../data/Stanford_Online_Products/Ebay_subtrain_preproc.csv")
     save_data(train_data.iloc[X_subtest_inds], "../../data/Stanford_Online_Products/Ebay_subval_preproc.csv")

@@ -9,6 +9,7 @@ from matplotlib import pyplot as plt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import random_split
 import torch.optim as optim
 import torchvision.models.detection.backbone_utils
@@ -218,20 +219,10 @@ class LitMetricLearning(L.LightningModule):
             print("Train new model")
             self.model = ResnetTriplet()
 
-        if torch.backends.mps.is_available():
-            dev = "mps"
-        elif torch.cuda.is_available():
-            dev = "cuda"
-        else:
-            dev = "cpu"
-        self.device = torch.device(dev)
-        print(f"device: {self.device}")
-
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
         self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
-        self.writer = SummaryWriter()
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -245,7 +236,6 @@ class LitMetricLearning(L.LightningModule):
             positive_img.to(self.device),
             negative_img.to(self.device),
         )
-        self.optimizer.zero_grad()
 
         anchor_img_emb = self.model(anchor_img)
         positive_img_emb = self.model(positive_img)
@@ -257,22 +247,18 @@ class LitMetricLearning(L.LightningModule):
     def training_step(self, batch, batch_idx):
         # training_step defines the train loop.
         loss = self._calculate_loss_per_batch(batch)
-        self.log("train_loss", loss)
+        self.log("train_loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         # this is the validation loop
         val_loss = self._calculate_loss_per_batch(batch)
-        self.log("val_loss", val_loss)
-
-    # def test_step(self, batch, batch_idx):
-    #     test_loss = self._calculate_loss_per_batch(batch)
-    #     self.log("test_loss", test_loss)
+        self.log("val_loss", val_loss, prog_bar=True)
 
 
 def load_data():
-    train_data = f"{data_path}Ebay_train_train_preproc.csv"
-    valid_data = f"{data_path}Ebay_train__val_preproc.csv"
+    train_data = f"{data_path}Ebay_subtrain_preproc.csv"
+    valid_data = f"{data_path}Ebay_subval_preproc.csv"
     test_data = f"{data_path}Ebay_test_preproc.csv"
     transformers = [
         transforms.Resize((224, 224)),
@@ -305,20 +291,25 @@ def plot_loss(train_loss_list, valid_loss_list, model_name):
 def main():
     model_name = "model18_inference_1e5_superlabel"
 
-    learning = MetricLearning(learning_rate=1e-5, weight_decay=0.1, model_name=model_name)
-
     # get data
     train_loader, valid_loader, test_loader = load_data()
 
-    train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=50)
-    torch.save(learning.model, f"../{model_name}.pt")
-    plot_loss(train_loss_list, valid_loss_list, model_name)
+    # learning = MetricLearning(learning_rate=1e-5, weight_decay=0.1, model_name=model_name)
+    # train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=50)
+    # torch.save(learning.model, f"../{model_name}.pt")
+    # plot_loss(train_loss_list, valid_loss_list, model_name)
 
-    predictions, pred_labels, true_labels = learning.predict(test_loader)
+    learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1, model_name=model_name)
+    logger = TensorBoardLogger("../", name="logs")
+    trainer = L.Trainer(accelerator="mps", devices=1, max_epochs=20, logger=logger)
+    trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    # torch.save(learning.model, f"../{model_name}.pt")
 
-    print(accuracy_score(true_labels, pred_labels))
-    print(true_labels[:10])
-    print(pred_labels[:10])
+    # predictions, pred_labels, true_labels = learning.predict(test_loader)
+
+    # print(accuracy_score(true_labels, pred_labels))
+    # print(true_labels[:10])
+    # print(pred_labels[:10])
 
 
 if __name__ == "__main__":
