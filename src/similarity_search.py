@@ -1,5 +1,4 @@
 import random
-import os
 from typing import List, Optional
 import numpy as np
 import pandas as pd
@@ -16,7 +15,6 @@ import torchvision.models.detection.backbone_utils
 from torchvision import transforms
 from PIL import Image
 from sklearn.metrics import accuracy_score
-from torch.utils.tensorboard import SummaryWriter
 
 from torchvision.models import ResNet18_Weights
 from tqdm import tqdm
@@ -101,128 +99,28 @@ class ResnetTriplet(nn.Module):
         return features
 
 
-class MetricLearning:
-    def __init__(self, learning_rate, weight_decay, model_name):
-        self.model_path = f"../{model_name}.pt"
-        if os.path.exists(self.model_path):
-            print("Load existing model")
-            self.model = torch.load(self.model_path)
-        else:
-            print("Train new model")
-            self.model = ResnetTriplet()
-
-        if torch.backends.mps.is_available():
-            dev = "mps"
-        elif torch.cuda.is_available():
-            dev = "cuda"
-        else:
-            dev = "cpu"
-        self.device = torch.device(dev)
-        print(f"device: {self.device}")
-
-        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
-
-    def calculate_loss(self, data_loader, phase):
-        predictions = []
-        true_labels = []
-        train_loss = 0
-        for i, data in tqdm(enumerate(data_loader), desc=phase):
-            # Extracting images and target labels for the batch being iterated
-            anchor_img, anchor_label, positive_img, negative_img = data
-            anchor_img, anchor_label, positive_img, negative_img = (
-                anchor_img.to(self.device),
-                anchor_label.to(self.device),
-                positive_img.to(self.device),
-                negative_img.to(self.device),
-            )
-            self.optimizer.zero_grad()
-
-            anchor_img_emb = self.model(anchor_img)
-            positive_img_emb = self.model(positive_img)
-            negative_img_emb = self.model(negative_img)
-
-            loss = self.triplet_loss(anchor_img_emb, positive_img_emb, negative_img_emb)
-            train_loss += loss.item()
-
-            if phase == "train":
-                loss.backward()
-                self.optimizer.step()
-            true_labels.extend(anchor_label.to(torch.device("cpu")).detach().numpy())
-            predictions.append(anchor_img_emb)
-
-        predictions = torch.cat(predictions, dim=0).to(torch.device("cpu")).detach().numpy()
-        return train_loss, predictions, true_labels
-
-    def train_test(self, train_loader, valid_loader, num_epochs=50):
-        self.model.to(self.device)
-        train_loss_list = []
-        valid_loss_list = []
-        for epoch in range(num_epochs):
-            print(f"Epoch {epoch}")
-            for phase in ["train", "valid"]:
-                if phase == "train":
-                    self.model.train()
-                    train_loss, predictions_train, true_labels_train = self.calculate_loss(train_loader, "train")
-                    train_loss_list.append(train_loss / len(train_loader))
-                    print(f"Training loss = {train_loss_list[-1]}")
-                else:
-                    with torch.no_grad():
-                        self.model.eval()
-                        # Iterating over the training dataset in batches
-                        valid_loss, predictions, true_labels = self.calculate_loss(valid_loader, "valid")
-
-                        valid_loss_list.append(valid_loss / len(valid_loader))
-                        print(f"Valid loss = {valid_loss_list[-1]}")
-
-            torch.save(self.model, self.model_path)
-
-        return train_loss_list, valid_loss_list
-
-    def predict(self, test_loader):
-        pred_labels = []
-        predictions = []
-        true_labels = []
-
-        with torch.no_grad():
-            model = self.model.to(self.device)
-            model.eval()
-            for i, data in enumerate(test_loader):
-                test_images, test_labels = data
-                test_images, test_labels = test_images.to(self.device), test_labels.to(self.device)
-
-                test_embs = model(test_images)
-
-                true_labels.extend(test_labels.to(torch.device("cpu")).detach().numpy())
-                predictions.append(test_embs)
-
-            predictions = torch.cat(predictions, dim=0)
-            for i, pred in enumerate(predictions):
-                distances = (
-                    self.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
-                )
-                pred_im_idx = np.argsort(distances)[1]  #:6]
-
-                pred_labels.append(np.take(true_labels, pred_im_idx))
-
-        return predictions, pred_labels, true_labels
-
-
 class LitMetricLearning(L.LightningModule):
-    def __init__(self, model_name, learning_rate, weight_decay):
+    def __init__(self, learning_rate, weight_decay):
         super().__init__()
-        self.model_path = f"../{model_name}.pt"
-        if os.path.exists(self.model_path):
-            print("Load existing model")
-            self.model = torch.load(self.model_path)
-        else:
-            print("Train new model")
-            self.model = ResnetTriplet()
+        # self.model_path = f"../{model_name}.pt"
+        # if os.path.exists(self.model_path):
+        #     print("Load existing model")
+        #     self.model = torch.load(self.model_path)
+        # else:
+        #     print("Train new model")
+        self.model = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
+        num_filters = self.model.fc.in_features
+        self.model.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
 
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
         self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
+
+    def forward(self, x):
+        features = self.model(x)
+        features = F.normalize(features, p=2, dim=1)
+        return features
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
@@ -255,39 +153,37 @@ class LitMetricLearning(L.LightningModule):
         val_loss = self._calculate_loss_per_batch(batch)
         self.log("val_loss", val_loss, prog_bar=True)
 
+    def predict_step(self, batch, batch_idx):
+        test_images, test_labels = batch
+        test_embs = self.model(test_images)
+        return test_embs, test_labels
 
-def predict(checkpoint, test_loader, device):
-    model = LitMetricLearning.load_from_checkpoint(checkpoint)
-    pred_labels = []
-    predictions = []
+
+def find_similar_items(predictions_labels, model):
     true_labels = []
+    predictions = []
+    for preds, test_labels in tqdm(predictions_labels):
+        predictions.append(preds)
+        true_labels.append(test_labels)
 
-    with torch.no_grad():
-        # model = model.to(device)
-        model.eval()
-        for i, data in enumerate(test_loader):
-            test_images, test_labels = data
-            # test_images, test_labels = test_images.to(device), test_labels.to(device)
+    predictions = torch.cat(predictions, dim=0)
+    true_labels = torch.cat(true_labels, dim=0)
 
-            test_embs = model(test_images)
+    pred_labels = []
+    for i, pred in tqdm(enumerate(predictions)):
+        distances = model.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
+        pred_im_idx = np.argsort(distances)[1]
+        pred_labels.append(np.take(true_labels, pred_im_idx))
 
-            true_labels.extend(test_labels.to(torch.device("cpu")).detach().numpy())
-            predictions.append(test_embs)
-
-        predictions = torch.cat(predictions, dim=0)
-        for i, pred in enumerate(predictions):
-            distances = model.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
-            pred_im_idx = np.argsort(distances)[1]
-
-            pred_labels.append(np.take(true_labels, pred_im_idx))
-
-    return predictions, pred_labels, true_labels
+    print(accuracy_score(true_labels, pred_labels))
+    print(true_labels[:10])
+    print(pred_labels[:10])
 
 
 def load_data():
     train_data = f"{data_path}Ebay_train_train_preproc.csv"
     valid_data = f"{data_path}Ebay_train__val_preproc.csv"
-    test_data = f"{data_path}Ebay_test_preproc.csv"
+    test_data = f"{data_path}Ebay_train__val_preproc.csv"
     transformers = [
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
@@ -324,28 +220,16 @@ def main():
     else:
         dev = "cpu"
 
-    model_name = "model18_inference_1e5_superlabel"
-
     # get data
     train_loader, valid_loader, test_loader = load_data()
 
-    # learning = MetricLearning(learning_rate=1e-5, weight_decay=0.1, model_name=model_name)
-    # train_loss_list, valid_loss_list = learning.train_test(train_loader, valid_loader, num_epochs=50)
-    # torch.save(learning.model, f"../{model_name}.pt")
-    # plot_loss(train_loss_list, valid_loss_list, model_name)
-
-    learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1, model_name=model_name)
+    learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1)
     logger = TensorBoardLogger("../", name="logs")
     trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=20, logger=logger)
     trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
-    # torch.save(learning.model, f"../{model_name}.pt")
 
-    # checkpoint = "../logs/version_1/checkpoints/epoch_20.ckpt"
-    # predictions, pred_labels, true_labels = predict(checkpoint, test_loader, torch.device(dev))
-    #
-    # print(accuracy_score(true_labels, pred_labels))
-    # print(true_labels[:10])
-    # print(pred_labels[:10])
+    predictions = trainer.predict(learning, dataloaders=test_loader)
+    find_similar_items(predictions, learning)
 
 
 if __name__ == "__main__":
