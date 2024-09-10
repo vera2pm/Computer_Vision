@@ -256,9 +256,37 @@ class LitMetricLearning(L.LightningModule):
         self.log("val_loss", val_loss, prog_bar=True)
 
 
+def predict(checkpoint, test_loader, device):
+    model = LitMetricLearning.load_from_checkpoint(checkpoint)
+    pred_labels = []
+    predictions = []
+    true_labels = []
+
+    with torch.no_grad():
+        # model = model.to(device)
+        model.eval()
+        for i, data in enumerate(test_loader):
+            test_images, test_labels = data
+            # test_images, test_labels = test_images.to(device), test_labels.to(device)
+
+            test_embs = model(test_images)
+
+            true_labels.extend(test_labels.to(torch.device("cpu")).detach().numpy())
+            predictions.append(test_embs)
+
+        predictions = torch.cat(predictions, dim=0)
+        for i, pred in enumerate(predictions):
+            distances = model.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
+            pred_im_idx = np.argsort(distances)[1]
+
+            pred_labels.append(np.take(true_labels, pred_im_idx))
+
+    return predictions, pred_labels, true_labels
+
+
 def load_data():
-    train_data = f"{data_path}Ebay_subtrain_preproc.csv"
-    valid_data = f"{data_path}Ebay_subval_preproc.csv"
+    train_data = f"{data_path}Ebay_train_train_preproc.csv"
+    valid_data = f"{data_path}Ebay_train__val_preproc.csv"
     test_data = f"{data_path}Ebay_test_preproc.csv"
     transformers = [
         transforms.Resize((224, 224)),
@@ -289,6 +317,13 @@ def plot_loss(train_loss_list, valid_loss_list, model_name):
 
 
 def main():
+    if torch.backends.mps.is_available():
+        dev = "mps"
+    elif torch.cuda.is_available():
+        dev = "cuda"
+    else:
+        dev = "cpu"
+
     model_name = "model18_inference_1e5_superlabel"
 
     # get data
@@ -301,12 +336,13 @@ def main():
 
     learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1, model_name=model_name)
     logger = TensorBoardLogger("../", name="logs")
-    trainer = L.Trainer(accelerator="mps", devices=1, max_epochs=20, logger=logger)
+    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=20, logger=logger)
     trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
     # torch.save(learning.model, f"../{model_name}.pt")
 
-    # predictions, pred_labels, true_labels = learning.predict(test_loader)
-
+    # checkpoint = "../logs/version_1/checkpoints/epoch_20.ckpt"
+    # predictions, pred_labels, true_labels = predict(checkpoint, test_loader, torch.device(dev))
+    #
     # print(accuracy_score(true_labels, pred_labels))
     # print(true_labels[:10])
     # print(pred_labels[:10])
