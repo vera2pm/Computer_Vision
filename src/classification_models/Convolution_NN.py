@@ -7,7 +7,7 @@ from torchvision.models.feature_extraction import create_feature_extractor
 torch.backends.mps.is_available()
 
 
-class CNN_MODEL(nn.Module):
+class CNNModel(nn.Module):
     def __init__(self, num_channels):
         super().__init__()
         self.conv1 = nn.Conv2d(in_channels=num_channels, out_channels=20, kernel_size=(7, 7))
@@ -46,8 +46,7 @@ class CNNFeatureExtractor(nn.Module):
         m = resnet50()
         # Extract 4 main layers (note: MaskRCNN needs this particular name
         # mapping for return nodes)
-        self.body = create_feature_extractor(
-            m, return_nodes=nodes)
+        self.body = create_feature_extractor(m, return_nodes=nodes)
 
         inp = torch.randn(2, 3, 150, 150)
         with torch.no_grad():
@@ -140,11 +139,11 @@ def train_val(train_data, val_data, model, device, num_epochs=50, learning_rate=
     train_val_loss_list = {"train": [], "val": []}
     test_acc_list = {"train": [], "val": []}
     for epoch in range(num_epochs):
-        print('Epoch {}/{}'.format(epoch+1, num_epochs))
-        print('-' * 10)
+        print("Epoch {}/{}".format(epoch + 1, num_epochs))
+        print("-" * 10)
         # Each epoch has a training and validation phase
-        for phase in ['train', 'val']:
-            if phase == 'train':
+        for phase in ["train", "val"]:
+            if phase == "train":
                 model.train()  # Set model to training mode
                 dataset = train_data
             else:
@@ -167,7 +166,7 @@ def train_val(train_data, val_data, model, device, num_epochs=50, learning_rate=
                 _, y_pred = torch.max(outputs.data, 1)
 
                 # Updating weights according to calculated loss
-                if phase == 'train':
+                if phase == "train":
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()

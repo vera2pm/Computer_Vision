@@ -1,9 +1,7 @@
 import cv2
 import numpy as np
 from matplotlib import pyplot as plt
-import os
-from tqdm import tqdm
-import torchvision.transforms as transforms
+import torch
 
 MIN_MATCH_COUNT = 10
 FLANN_INDEX_KDTREE = 1
@@ -34,13 +32,15 @@ def draw_matches(gray_img, keypoints1, rgb_half, keypoints2, good_matches, match
     if draw_subset:
         good_matches = good_matches[:100]
         matchesMask = matchesMask[:100]
-    draw_params = dict(matchColor=(0, 255, 0),  # draw matches in green color
-                       singlePointColor=None,
-                       matchesMask=matchesMask,  # draw only inliers
-                       flags=2)
+    draw_params = dict(
+        matchColor=(0, 255, 0),  # draw matches in green color
+        singlePointColor=None,
+        matchesMask=matchesMask,  # draw only inliers
+        flags=2,
+    )
     imag_matches = cv2.drawMatches(gray_img, keypoints1, rgb_half, keypoints2, good_matches, None, **draw_params)
     plt.figure(figsize=(15, 7))
-    plt.imshow(imag_matches, 'gray')
+    plt.imshow(imag_matches, "gray")
     plt.show()
 
 
@@ -82,48 +82,16 @@ def check_result(objpoints, imgpoints, mtx, dist, rvecs, tvecs):
     mean_error = 0
     for i in range(len(objpoints)):
         imgpoints2, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], mtx, dist)
-        error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)/len(imgpoints2)
+        error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2) / len(imgpoints2)
         mean_error += error
     print(f"total error: {mean_error/len(objpoints)}")
 
 
-def load_data(datasets_path, class_names_label, image_size):
-    """
-        Load the data:
-            - 14,034 images to train the network.
-            - 3,000 images to evaluate how accurately the network learned to classify images.
-    """
-    output = []
-    transform = transforms.ToTensor()
-
-    # Iterate through training and test sets
-    for dataset in datasets_path:
-        images = []
-        labels = []
-        print("Loading {}".format(dataset))
-        # Iterate through each folder corresponding to a category
-        for folder in os.listdir(dataset):
-            if folder not in class_names_label.keys():
-                continue
-            label = class_names_label[folder]
-
-            # Iterate through each image in our folder
-            for file in tqdm(os.listdir(os.path.join(dataset, folder))):
-                # Get the path name of the image
-                img_path = os.path.join(os.path.join(dataset, folder), file)
-
-                # Open and resize the img
-                image = cv2_load2rgb(img_path)
-                if image.shape != (150, 150, 3):
-                    print(image.shape)
-                image = cv2.resize(image, image_size)
-
-                # Append the image and its corresponding label to the output
-                images.append(image)
-                labels.append(label)
-
-        # images = np.array(images, dtype='float32')
-        labels = np.array(labels, dtype='int32')
-        output.append((images, labels))
-
-    return output
+def get_device():
+    if torch.backends.mps.is_available():
+        dev = "mps"
+    elif torch.cuda.is_available():
+        dev = "cuda"
+    else:
+        dev = "cpu"
+    return dev
