@@ -21,6 +21,8 @@ from tqdm import tqdm
 from sklearn.decomposition import PCA
 import lightning as L
 
+from src.utils import get_device
+
 data_path = "../data/Stanford_Online_Products/"
 
 
@@ -213,12 +215,7 @@ def plot_loss(train_loss_list, valid_loss_list, model_name):
 
 
 def main():
-    if torch.backends.mps.is_available():
-        dev = "mps"
-    elif torch.cuda.is_available():
-        dev = "cuda"
-    else:
-        dev = "cpu"
+    dev = get_device()
 
     # get data
     train_loader, valid_loader, test_loader = load_data()
