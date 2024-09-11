@@ -171,4 +171,3 @@ class Segmentation(L.LightningModule):
             mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
             n_blob_pred.append(blob_detection(mask, i))
         return n_blob_pred
-
