@@ -20,6 +20,8 @@ from torchvision.models import ResNet18_Weights
 from tqdm import tqdm
 from sklearn.decomposition import PCA
 import lightning as L
+from lightning.pytorch.callbacks import ModelCheckpoint
+
 
 data_path = "../data/Stanford_Online_Products/"
 
@@ -167,7 +169,7 @@ def find_similar_items(predictions_labels, model):
         true_labels.append(test_labels)
 
     predictions = torch.cat(predictions, dim=0)
-    true_labels = torch.cat(true_labels, dim=0)
+    true_labels = torch.cat(true_labels, dim=0).to(torch.device("cpu")).detach().numpy()
 
     pred_labels = []
     for i, pred in tqdm(enumerate(predictions)):
@@ -183,7 +185,8 @@ def find_similar_items(predictions_labels, model):
 def load_data():
     train_data = f"{data_path}Ebay_train_train_preproc.csv"
     valid_data = f"{data_path}Ebay_train__val_preproc.csv"
-    test_data = f"{data_path}Ebay_train__val_preproc.csv"
+    train_full_data = f"{data_path}Ebay_train_preproc.csv"
+    test_data = f"{data_path}Ebay_test_preproc.csv"
     transformers = [
         transforms.Resize((224, 224)),
         transforms.RandomHorizontalFlip(p=0.5),
@@ -191,15 +194,18 @@ def load_data():
     ]
 
     train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers, is_super_label=True)
-    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=56, shuffle=True)
+    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=56, num_workers=7, shuffle=True)
 
     valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers, is_super_label=True)
-    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=56, shuffle=True)
+    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=56, num_workers=7, shuffle=False)
+
+    train_full_data_ds = TripletDataset(train_full_data, is_train=True, transform=transformers, is_super_label=True)
+    train_full_loader = torch.utils.data.DataLoader(train_full_data_ds, batch_size=56, num_workers=7, shuffle=True)
 
     test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers, is_super_label=True)
-    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=40)
+    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=40, num_workers=7)
 
-    return train_loader, valid_loader, test_loader
+    return train_loader, valid_loader, train_full_loader, test_loader
 
 
 def plot_loss(train_loss_list, valid_loss_list, model_name):
@@ -221,13 +227,18 @@ def main():
         dev = "cpu"
 
     # get data
-    train_loader, valid_loader, test_loader = load_data()
+    train_loader, valid_loader, train_full_loader, test_loader = load_data()
 
-    learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1)
+    checkpoint_callback = ModelCheckpoint(dirpath="../logs/", save_top_k=1, monitor="val_loss")
     logger = TensorBoardLogger("../", name="logs")
-    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=20, logger=logger)
-    trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=10, logger=logger, callbacks=[checkpoint_callback])
 
+    # learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1)
+    # trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+
+    learning = LitMetricLearning.load_from_checkpoint("../logs/version_2/epoch=5-step=4266.ckpt",
+                                                      learning_rate=1e-5, weight_decay=0.1)
+    trainer.fit(model=learning, train_dataloaders=train_full_loader)
     predictions = trainer.predict(learning, dataloaders=test_loader)
     find_similar_items(predictions, learning)
 
