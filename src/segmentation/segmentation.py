@@ -1,22 +1,36 @@
 import os
+import json
 import cv2
-import matplotlib.pyplot as plt
-import pandas as pd
-import torch.optim as optim
-import torch
-from torchmetrics.detection import MeanAveragePrecision
-import numpy as np
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 from PIL import Image
 import torchvision.transforms as transforms
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+import lightning as L
+from lightning.pytorch.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 
-from src.segmentation.unet_model import UNet
+import torch
+import torch.optim as optim
+from torchmetrics.detection import MeanAveragePrecision
+
+from src.segmentation.blob_detection import blob_detection
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 from src.configs.segment_config import IN_CHANNELS, OUT_CHANNELS
 from src.segmentation.dice_loss import DiceLoss
 
-from skimage.feature import blob_dog, blob_log, blob_doh
+
+def load_images(amount_dict_file, img_dir):
+    with open(amount_dict_file) as f:
+        amount_dict = json.load(f)
+    loaded_images = []
+    loaded_masks = []
+    loaded_target_amount = []
+    for img_name, amount in amount_dict.items():
+        img_filename = os.path.join(img_dir, img_name)
+        loaded_images.append(img_filename)
+        mask_filename = os.path.join(img_dir, f"mask_{img_name}")
+        loaded_masks.append(mask_filename)
+        loaded_target_amount.append(amount)
+
+    return loaded_images, loaded_masks, loaded_target_amount
 
 
 class SegmentationDataset(torch.utils.data.Dataset):
@@ -47,205 +61,148 @@ class SegmentationDataset(torch.utils.data.Dataset):
         return len(self.imgs)
 
 
-def blob_detection(img, i):
-    if type(img) == str:
-        hotdog = cv2.imread(img, cv2.IMREAD_GRAYSCALE)
-    else:
-        hotdog = img
-        hotdog = cv2.cvtColor(hotdog, cv2.COLOR_BGR2GRAY)
-    # hotdog = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    # hotdog = hotdog.astype(np.uint8)
-    # print(f"max {np.max(hotdog)}")
+class SegmentationDataModule(L.LightningDataModule):
+    def __init__(self, train_path, test_path, train_files, test_files, transformers, batch_size: int):
+        super().__init__()
+        self.train_path = train_path
+        self.test_path = test_path
+        self.train_files = train_files
+        self.test_files = test_files
+        self.batch_size = batch_size
+        self.transformers = transformers
 
-    # hotdog = cv2.cvtColor(hotdog, cv2.COLOR_BGR2GRAY)
-    hotdog = cv2.normalize(hotdog, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    # hotdog = hotdog.astype(np.uint8)
-    print(hotdog.shape)
+    def setup(self, stage: str) -> None:
+        if stage == "fit":
+            loaded_images_train, loaded_target_regions_train, train_target_amount = load_images(
+                self.train_files, self.train_path
+            )
 
-    # blobs = blob_log(hotdog, max_sigma=30, num_sigma=10, threshold=60)
-    blobs = blob_dog(hotdog, max_sigma=100, threshold=60)
-    print(len(blobs))
+            train_data = SegmentationDataset(
+                loaded_images_train, loaded_target_regions_train, train_target_amount, self.transformers
+            )
+            print("Split to train and validation subsets")
+            self.train_subset, self.val_subset = torch.utils.data.random_split(
+                train_data, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
+            )
+        if stage == "test":
+            loaded_images_test, loaded_target_regions_test, test_target_amount = load_images(
+                self.test_files, self.test_path
+            )
+            self.test_data = SegmentationDataset(
+                loaded_images_test, loaded_target_regions_test, test_target_amount, self.transformers
+            )
 
-    fig, ax = plt.subplots()
-    ax.imshow(hotdog, cmap="gray")
-    for blob in blobs:
-        y, x, area = blob
-        ax.add_patch(plt.Circle((x, y), area * np.sqrt(2), color="r", fill=False))
-    # plt.show()
-    fig.savefig(f"../data/test_ima/test_mask_{i}.jpg")
-    return len(blobs)
+    def train_dataloader(self) -> TRAIN_DATALOADERS:
+        return torch.utils.data.DataLoader(
+            self.train_subset, batch_size=self.batch_size, shuffle=True, num_workers=7, persistent_workers=True
+        )
 
+    def val_dataloader(self) -> EVAL_DATALOADERS:
+        return torch.utils.data.DataLoader(
+            self.val_subset, batch_size=self.batch_size, shuffle=False, num_workers=7, persistent_workers=True
+        )
 
-def blob_detection_1(img, i):
-    """
-    Function to detect blob in one image
-    :param img:
-    :return:
-    """
-    # Read image
-    if type(img) == str:
-        img = cv2.imread(img, cv2.IMREAD_GRAYSCALE)
-    else:
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img = cv2.normalize(img, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-    img = img.astype(np.uint8)
-    img = 255 - img
-    # print(img)
-
-    # Set up the detector with default parameters.
-    params = cv2.SimpleBlobDetector_Params()
-    params.minInertiaRatio = 0.01
-
-    # Create a detector with the parameters
-    detector = cv2.SimpleBlobDetector_create(params)
-
-    # Detect blobs.
-    keypoints = detector.detect(img)
-    print(len(keypoints))
-
-    # Draw detected blobs as red circles.
-    # cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS ensures the size of the circle corresponds to the size of blob
-    blank = np.zeros((1, 1))
-    blobs = cv2.drawKeypoints(img, keypoints, blank, (255, 0, 255), cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
-
-    # Show keypoints
-    fig, ax = plt.subplots()
-    ax.imshow(blobs)
-    # plt.show()
-    # fig = plt.figure(figsize=(15, 5))
-    # plt.imshow(blobs)
-    # fig.suptitle("title")
-    cv2.imwrite(f"../key_points.jpg", blobs)
-    fig.savefig(f"../data/test_ima/test_mask_{i}.jpg")
-    # plt.savefig(f'../key_points.jpg')
-    print("Saved file")
-    return len(keypoints)
+    def test_dataloader(self) -> EVAL_DATALOADERS:
+        return torch.utils.data.DataLoader(
+            self.test_data, batch_size=self.batch_size, shuffle=False, num_workers=7, persistent_workers=True
+        )
 
 
-def train_val(
-    loader_train, loader_valid, device, num_epochs=50, learning_rate=0.001, weight_decay=0.1, model_path=None
-):
-    loaders = {"train": loader_train, "valid": loader_valid}
+class Segmentation(L.LightningModule):
+    def __init__(self, model, learning_rate, weight_decay):
+        super().__init__()
+        self.model = model
+        self.save_hyperparameters(ignore=["model"])
 
-    if model_path is None:
-        model = UNet(in_channels=SegmentationDataset.in_channels, out_channels=SegmentationDataset.out_channels)
-    else:
-        model = torch.load(model_path)
-    model.to(device)
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
 
-    dsc_loss = DiceLoss()
-    metric = MeanAveragePrecision(iou_type="segm")
-    best_validation_dsc = 0.0
+        self.dsc_loss = DiceLoss()
+        metric = MeanAveragePrecision(iou_type="segm")
 
-    optimizer = optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+        return optimizer
 
-    # logger = logging
-    loss_train = []
-    loss_valid = []
-    loss_df = []
-    step = 0
-    for epoch in tqdm(range(num_epochs), total=num_epochs):
-        for phase in ["train", "valid"]:
-            if phase == "train":
-                model.train()
-            else:
-                model.eval()
+    def _calculate_loss_per_batch(self, data):
+        images, masks_true, n_blobs = data
+        masks_pred = self.model(images)
+        loss = self.dsc_loss(masks_pred, masks_true)
 
-            for i, data in enumerate(loaders[phase]):
-                if phase == "train":
-                    step += 1
+        return loss
 
-                images, masks_true, n_blobs = data
-                images, masks_true = images.to(device), masks_true.to(device)
+    def training_step(self, batch):
+        # training_step defines the train loop.
+        loss = self._calculate_loss_per_batch(batch)
+        self.log("train_loss", loss, prog_bar=True)
+        return loss
 
-                optimizer.zero_grad()
+    def validation_step(self, batch):
+        # this is the validation loop
+        val_loss = self._calculate_loss_per_batch(batch)
+        self.log("val_loss", val_loss, prog_bar=True)
 
-                with torch.set_grad_enabled(phase == "train"):
-                    masks_pred = model(images)
+    def test_step(self, batch):
+        images, masks_true, n_blobs = batch
 
-                    loss = dsc_loss(masks_pred, masks_true)
-
-                    if phase == "valid":
-                        loss_valid.append(loss.item())
-                        #
-                        # preds = [
-                        #     dict(
-                        #         masks=mask_pred,
-                        #         scores=torch.tensor([0.536]),
-                        #         labels=torch.tensor([0]),
-                        #     )
-                        #     for mask_pred in masks_pred
-                        # ]
-                        # target = [
-                        #     dict(
-                        #         masks=mask_pred,
-                        #         labels=torch.tensor([0]),
-                        #     )
-                        #     for mask_pred in masks_pred
-                        # ]
-                        # metric.update(preds, target)
-
-                    if phase == "train":
-                        loss_train.append(loss.item())
-                        loss.backward()
-                        optimizer.step()
-
-                if phase == "train" and (step + 1) % 10 == 0:
-                    # log_loss_summary(logger, loss_train, step)
-                    print(loss_train[-1])
-                    # loss_train = []
-
-            if phase == "valid":
-                # log_loss_summary(logger, loss_valid, step, prefix="val_")
-                mean_dsc = np.mean(loss_valid)
-                if mean_dsc > best_validation_dsc:
-                    best_validation_dsc = mean_dsc
-                    # torch.save(model.state_dict(), os.path.join(, "model.pt"))
-                # loss_valid = []
-
-        loss_df.append({"epoch": epoch, "train": np.mean(loss_train), "test": np.mean(loss_valid)})
-        loss_train = []
-        loss_valid = []
-
-    loss_df = pd.DataFrame(loss_df)
-    print("Best validation mean DSC: {:4f}".format(best_validation_dsc))
-    torch.save(model, "../model_inference.pt")
-    return model, loss_df, metric
-
-
-def predict_segmentation(loader_test, device, model=None):
-    if model is None:
-        model = torch.load("../model_inference_50.pt")
-    model.to(device)
-    test_loss_list = []
-    model.eval()
-    dsc_loss = DiceLoss()
-    metric = MeanAveragePrecision(iou_type="segm")
-    n_blob_pred = []
-    n_blob_true_list = []
-    for i, data in enumerate(loader_test):
-        images, masks_true, n_blobs_true = data
-        n_blob_true_list.extend(n_blobs_true)
-        images, masks_true = images.to(device), masks_true.to(device)
-
-        masks_pred = model(images)
-        loss = dsc_loss(masks_pred, masks_true)
+        masks_pred = self.model(images)
+        loss = self.dsc_loss(masks_pred, masks_true)
         masks_pred = masks_pred.to(torch.device("cpu")).detach().numpy()
+        n_blob_pred = []
         for i, mask in enumerate(masks_pred):
             mask = mask.transpose(1, 2, 0)
             mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
             n_blob_pred.append(blob_detection(mask, i))
 
-        # gather the stats from all processes
-        test_loss_list.append(loss)
+        blobs_error = mean_squared_error(n_blobs, n_blob_pred)
+        self.log("test_RMSE", blobs_error, prog_bar=True)
+        self.log("test_MAE", mean_absolute_error(n_blobs, n_blob_pred), prog_bar=True)
 
-    blobs_error = mean_squared_error(n_blob_true_list, n_blob_pred)
-    print(f"RMSE blobs: {blobs_error}")
-    print(f"MAE: {mean_absolute_error(n_blob_true_list, n_blob_pred)}")
+        self.log("test_loss", loss, prog_bar=True)
 
-    # torch.set_num_threads(n_threads)
-    return n_blob_pred, metric, test_loss_list, blobs_error
+    def predict_step(self, batch):
+        images, masks_true, n_blobs = batch
+
+        masks_pred = self.model(images)
+        masks_pred = masks_pred.to(torch.device("cpu")).detach().numpy()
+        n_blob_pred = []
+        for i, mask in enumerate(masks_pred):
+            mask = mask.transpose(1, 2, 0)
+            mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
+            n_blob_pred.append(blob_detection(mask, i))
+        return n_blob_pred
 
 
-def predict_test():
-    pass
+#
+# def predict_segmentation(loader_test, device, model=None):
+#     if model is None:
+#         model = torch.load("../model_inference_50.pt")
+#     model.to(device)
+#     test_loss_list = []
+#     model.eval()
+#     dsc_loss = DiceLoss()
+#     metric = MeanAveragePrecision(iou_type="segm")
+#     n_blob_pred = []
+#     n_blob_true_list = []
+#     for i, data in enumerate(loader_test):
+#         images, masks_true, n_blobs_true = data
+#         n_blob_true_list.extend(n_blobs_true)
+#         images, masks_true = images.to(device), masks_true.to(device)
+#
+#         masks_pred = model(images)
+#         loss = dsc_loss(masks_pred, masks_true)
+#         masks_pred = masks_pred.to(torch.device("cpu")).detach().numpy()
+#         for i, mask in enumerate(masks_pred):
+#             mask = mask.transpose(1, 2, 0)
+#             mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
+#             n_blob_pred.append(blob_detection(mask, i))
+#
+#         # gather the stats from all processes
+#         test_loss_list.append(loss)
+#
+#     blobs_error = mean_squared_error(n_blob_true_list, n_blob_pred)
+#     print(f"RMSE blobs: {blobs_error}")
+#     print(f"MAE: {mean_absolute_error(n_blob_true_list, n_blob_pred)}")
+#
+#     # torch.set_num_threads(n_threads)
+#     return n_blob_pred, metric, test_loss_list, blobs_error
