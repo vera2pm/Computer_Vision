@@ -85,7 +85,7 @@ class Classification(L.LightningModule):
     def __init__(self, model, learning_rate, weight_decay):
         super().__init__()
         self.model = model
-        self.save_hyperparameters(ignore=['model'])
+        self.save_hyperparameters(ignore=["model"])
 
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
