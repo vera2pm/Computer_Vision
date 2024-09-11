@@ -41,6 +41,7 @@ def main():
     learning = Segmentation(model, learning_rate=1.0e-4, weight_decay=0.1)
     trainer.fit(model=learning, datamodule=data_module)
 
+    learning = Segmentation.load_from_checkpoint(checkpoint_callback.best_model_path)
     trainer.test(learning, datamodule=data_module)
 
 

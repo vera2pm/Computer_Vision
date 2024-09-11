@@ -153,7 +153,7 @@ class Segmentation(L.LightningModule):
             mask = mask.transpose(1, 2, 0)
             mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
             n_blob_pred.append(blob_detection(mask, i))
-
+        n_blobs = n_blobs.to(torch.device("cpu")).detach().numpy()
         blobs_error = mean_squared_error(n_blobs, n_blob_pred)
         self.log("test_RMSE", blobs_error, prog_bar=True)
         self.log("test_MAE", mean_absolute_error(n_blobs, n_blob_pred), prog_bar=True)
@@ -172,37 +172,3 @@ class Segmentation(L.LightningModule):
             n_blob_pred.append(blob_detection(mask, i))
         return n_blob_pred
 
-
-#
-# def predict_segmentation(loader_test, device, model=None):
-#     if model is None:
-#         model = torch.load("../model_inference_50.pt")
-#     model.to(device)
-#     test_loss_list = []
-#     model.eval()
-#     dsc_loss = DiceLoss()
-#     metric = MeanAveragePrecision(iou_type="segm")
-#     n_blob_pred = []
-#     n_blob_true_list = []
-#     for i, data in enumerate(loader_test):
-#         images, masks_true, n_blobs_true = data
-#         n_blob_true_list.extend(n_blobs_true)
-#         images, masks_true = images.to(device), masks_true.to(device)
-#
-#         masks_pred = model(images)
-#         loss = dsc_loss(masks_pred, masks_true)
-#         masks_pred = masks_pred.to(torch.device("cpu")).detach().numpy()
-#         for i, mask in enumerate(masks_pred):
-#             mask = mask.transpose(1, 2, 0)
-#             mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
-#             n_blob_pred.append(blob_detection(mask, i))
-#
-#         # gather the stats from all processes
-#         test_loss_list.append(loss)
-#
-#     blobs_error = mean_squared_error(n_blob_true_list, n_blob_pred)
-#     print(f"RMSE blobs: {blobs_error}")
-#     print(f"MAE: {mean_absolute_error(n_blob_true_list, n_blob_pred)}")
-#
-#     # torch.set_num_threads(n_threads)
-#     return n_blob_pred, metric, test_loss_list, blobs_error
