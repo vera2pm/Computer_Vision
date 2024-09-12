@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import random_split
 from torchvision.models.feature_extraction import get_graph_node_names
 
+from src.classification_models.knn_classification import KnnClassificate
 from src.utils import get_device
 
 from torchvision import transforms
@@ -58,9 +59,9 @@ class ClassificationDataModule(L.LightningDataModule):
 
     def setup(self, stage: str) -> None:
         if stage == "fit":
-            train_data = ClassificationDataset(self.train_path, transform=self.transformers)
+            self.train_data = ClassificationDataset(self.train_path, transform=self.transformers)
             self.train_subset, self.val_subset = torch.utils.data.random_split(
-                train_data, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
+                self.train_data, [0.8, 0.2], generator=torch.Generator().manual_seed(42)
             )
         if stage == "test":
             self.test_data = ClassificationDataset(self.test_path, transform=self.transformers)
@@ -134,14 +135,24 @@ def run_model(model, model_name, data_module, dev, learning_rate):
 
     # train
     learning = Classification.load_from_checkpoint(
-        checkpoint_callback.best_model_path,  # learning_rate=learning_rate, weight_decay=0.1
+        checkpoint_callback.best_model_path,
     )
-    # trainer.fit(model=learning, train_dataloaders=train_full_loader, val_dataloaders=test_loader)
     # test
     trainer.test(learning, datamodule=data_module)
 
 
 def main():
+    # KNN
+    print("KNN")
+    knn = KnnClassificate(
+        "../Classification_data/train/",
+        "../Classification_data/test/",
+        image_size=150 * 150 * 3,
+        k=3,
+    )
+    knn.train()
+    predict_test_labels = knn.predict()
+
     dev = get_device()
     print("prepare torch dataset")
 
@@ -153,14 +164,6 @@ def main():
     data_module = ClassificationDataModule(
         "../Classification_data/train/", "../Classification_data/test/", transformers, 40
     )
-
-    # KNN
-    # print("KNN")
-    # knn = KnnClassificate(k=3, image_size=150*150*3)
-    # knn.train(train_images, train_labels)
-    # predict_test_labels = knn.predict(test_images)
-    # knn.evaluate_model(test_labels, predict_test_labels)
-
     # model CNN
     print("CNN")
     model = CNNModel(num_channels=3)
