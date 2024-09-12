@@ -115,7 +115,7 @@ class LitMetricLearning(L.LightningModule):
         self.model = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         num_filters = self.model.fc.in_features
         self.model.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
-
+        self.save_hyperparameters(ignore=["model"])
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
 
@@ -230,12 +230,10 @@ def main():
     logger = TensorBoardLogger("../", name="logs")
     trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=10, logger=logger, callbacks=[checkpoint_callback])
 
-    # learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1)
-    # trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1)
+    trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
 
-    learning = LitMetricLearning.load_from_checkpoint("../logs/version_2/epoch=5-step=4266.ckpt",
-                                                      learning_rate=1e-5, weight_decay=0.1)
-    trainer.fit(model=learning, train_dataloaders=train_full_loader)
+    learning = LitMetricLearning.load_from_checkpoint(checkpoint_callback.best_model_path)
     predictions = trainer.predict(learning, dataloaders=test_loader)
     find_similar_items(predictions, learning)
 
