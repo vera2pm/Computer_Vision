@@ -4,6 +4,9 @@ from lightning.pytorch.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADER
 import torch
 from torch.utils.data import random_split
 from torchvision.models.feature_extraction import get_graph_node_names
+import sys
+
+sys.path.append('../')
 
 from src.classification_models.knn_classification import KnnClassificate
 from src.utils import get_device
@@ -20,6 +23,7 @@ from PIL import Image
 
 import lightning as L
 from tqdm import tqdm
+from sklearn.metrics import accuracy_score, recall_score, precision_score
 
 
 class ClassificationDataset(torch.utils.data.Dataset):
@@ -86,7 +90,7 @@ class Classification(L.LightningModule):
     def __init__(self, model, learning_rate, weight_decay):
         super().__init__()
         self.model = model
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters()  # ignore=["model"])
 
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -116,8 +120,18 @@ class Classification(L.LightningModule):
         self.log("val_loss", val_loss, prog_bar=True)
 
     def test_step(self, batch, *args: Any, **kwargs: Any):
-        val_loss = self._calculate_loss_per_batch(batch)
-        self.log("test_loss", val_loss, prog_bar=True)
+        images, true_labels = batch
+        predicted_labels = self.model(images)
+
+        loss = self.criterion(predicted_labels, true_labels)
+        self.log("test_loss", loss, prog_bar=True)
+
+        accur = accuracy_score(true_labels, predicted_labels)
+        precision = precision_score(true_labels, predicted_labels, average="macro")
+        recall = recall_score(true_labels, predicted_labels, average="macro")
+        self.log("test_accuracy", accur, prog_bar=True)
+        self.log("test_precision", accur, prog_bar=True)
+        self.log("test_precision", accur, prog_bar=True)
 
     def predict_step(self, batch, batch_idx):
         test_images, test_labels = batch
