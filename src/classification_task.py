@@ -121,28 +121,36 @@ class Classification(L.LightningModule):
 
     def test_step(self, batch, *args: Any, **kwargs: Any):
         images, true_labels = batch
-        predicted_labels = self.model(images)
+        output = self.model(images)
 
-        loss = self.criterion(predicted_labels, true_labels)
+        loss = self.criterion(output, true_labels)
         self.log("test_loss", loss, prog_bar=True)
 
+        _, predicted_labels = torch.max(output.data, 1)
+
+        true_labels, predicted_labels = true_labels.to(torch.device("cpu")).detach().numpy(), predicted_labels.to(torch.device("cpu")).detach().numpy()
         accur = accuracy_score(true_labels, predicted_labels)
         precision = precision_score(true_labels, predicted_labels, average="macro")
         recall = recall_score(true_labels, predicted_labels, average="macro")
         self.log("test_accuracy", accur, prog_bar=True)
-        self.log("test_precision", accur, prog_bar=True)
-        self.log("test_precision", accur, prog_bar=True)
+        self.log("test_precision", precision, prog_bar=True)
+        self.log("test_recall", recall, prog_bar=True)
 
     def predict_step(self, batch, batch_idx):
-        test_images, test_labels = batch
-        test_embs = self.model(test_images)
-        return test_embs, test_labels
+        images, true_labels = batch
+        output = self.model(images)
+
+        loss = self.criterion(output, true_labels)
+        self.log("test_loss", loss, prog_bar=True)
+
+        _, predicted_labels = torch.max(output.data, 1)
+        return predicted_labels
 
 
 def run_model(model, model_name, data_module, dev, learning_rate):
     logger = TensorBoardLogger("../logs/", name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath=f"../logs/{model_name}/", save_top_k=1, monitor="val_loss")
-    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=10, logger=logger, callbacks=[checkpoint_callback])
+    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=30, logger=logger, callbacks=[checkpoint_callback])
 
     learning = Classification(model=model, learning_rate=learning_rate, weight_decay=0.1)
     trainer.fit(model=learning, datamodule=data_module)
@@ -185,7 +193,7 @@ def main():
 
     # model AlexNet
     print("AlexNet")
-    model_alex = AlexNet(num_classes=3)
+    model_alex = AlexNet(num_classes=6)
     run_model(model_alex, "AlexNet", data_module, dev, 1e-5)
 
     # model with feature extractor
@@ -193,7 +201,6 @@ def main():
     train_nodes, eval_nodes = get_graph_node_names(resnet50())
     return_nodes = train_nodes[5:-2]
     model_features = CNNFeatureExtractor(return_nodes)
-
     run_model(model_features, "Extractor", data_module, dev, 1e-5)
 
 
