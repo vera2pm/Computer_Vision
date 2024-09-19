@@ -1,7 +1,11 @@
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
-import torchvision.transforms as transforms
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+import sys
+
+sys.path.append("../")
 from src.segmentation.segmentation import SegmentationDataset, Segmentation, SegmentationDataModule
 from src.configs.segment_config import IMAGE_SIZE, train_path, test_path, train_files, test_files
 from src.segmentation.unet_model import UNet
@@ -26,19 +30,27 @@ def main():
     # prepare dataset
     print("prepare dataset")
     # prepare torch dataset
-    transformers = transforms.Compose([transforms.Resize(IMAGE_SIZE)])
+    transformers = [
+        A.Resize(256, 256),
+        A.HorizontalFlip(p=0.5),
+        A.VerticalFlip(p=0.5),
+        A.GaussianBlur(3),
+        A.RandomResizedCrop(IMAGE_SIZE),
+        ToTensorV2(transpose_mask=True),
+    ]
+    transformers = A.Compose(transformers)
     data_module = SegmentationDataModule(train_path, test_path, train_files, test_files, transformers, 20)
 
     model = UNet(in_channels=SegmentationDataset.in_channels, out_channels=SegmentationDataset.out_channels)
 
-    model_name = "UNet"
+    model_name = "UNet_aug"
     dev = get_device()
 
     logger = TensorBoardLogger("../logs/", name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath=f"../logs/{model_name}/", save_top_k=1, monitor="val_loss")
-    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=10, logger=logger, callbacks=[checkpoint_callback])
+    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=200, logger=logger, callbacks=[checkpoint_callback])
 
-    learning = Segmentation(model, learning_rate=1.0e-4, weight_decay=0.1)
+    learning = Segmentation(model, learning_rate=1.0e-5, weight_decay=0.1)
     trainer.fit(model=learning, datamodule=data_module)
 
     learning = Segmentation.load_from_checkpoint(checkpoint_callback.best_model_path)

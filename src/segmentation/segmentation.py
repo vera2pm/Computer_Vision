@@ -1,8 +1,8 @@
 import os
 import json
 import cv2
+import numpy as np
 from torch.utils.data import DataLoader
-from PIL import Image
 import torchvision.transforms as transforms
 import lightning as L
 from lightning.pytorch.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
@@ -44,16 +44,23 @@ class SegmentationDataset(torch.utils.data.Dataset):
         self.n_blobs = n_blobs
 
     def __getitem__(self, idx):
-        image = Image.open(self.imgs[idx])
-        mask = Image.open(self.mask[idx])
+        image = cv2.imread(self.imgs[idx])
+        mask = cv2.imread(self.mask[idx], cv2.IMREAD_GRAYSCALE)
         n_blobs = self.n_blobs[idx]
 
-        if self.transforms is not None:
-            image = self.transforms(image)
-            mask = self.transforms(mask)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        # mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2RGB)
 
-        image_tensor = transforms.ToTensor()(image)
-        mask_tensor = transforms.ToTensor()(mask)
+        if self.transforms is not None:
+            transformed = self.transforms(image=image, mask=mask)
+            image_tensor = transformed["image"]
+            mask_tensor = transformed["mask"]
+
+        mask_tensor = mask_tensor.unsqueeze(0)
+        image_tensor = image_tensor.float()
+
+        # image_tensor = transforms.ToTensor()(image)
+        # mask_tensor = transforms.ToTensor()(mask)
 
         return image_tensor, mask_tensor, n_blobs
 
@@ -112,7 +119,7 @@ class Segmentation(L.LightningModule):
     def __init__(self, model, learning_rate, weight_decay):
         super().__init__()
         self.model = model
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters()  # ignore=["model"])
 
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
@@ -154,11 +161,13 @@ class Segmentation(L.LightningModule):
             mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
             n_blob_pred.append(blob_detection(mask, i))
         n_blobs = n_blobs.to(torch.device("cpu")).detach().numpy()
-        blobs_error = mean_squared_error(n_blobs, n_blob_pred)
-        self.log("test_RMSE", blobs_error, prog_bar=True)
+
         self.log("test_MAE", mean_absolute_error(n_blobs, n_blob_pred), prog_bar=True)
 
         self.log("test_loss", loss, prog_bar=True)
+        tensorboard_logger = self.logger.experiment
+        for i, pred in enumerate(masks_pred):
+            tensorboard_logger.add_image("test_preds", pred, i)
 
     def predict_step(self, batch):
         images, masks_true, n_blobs = batch
@@ -168,6 +177,6 @@ class Segmentation(L.LightningModule):
         n_blob_pred = []
         for i, mask in enumerate(masks_pred):
             mask = mask.transpose(1, 2, 0)
-            mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
+            mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)  # blob detection needs BGR, when mask is in RGB
             n_blob_pred.append(blob_detection(mask, i))
         return n_blob_pred
