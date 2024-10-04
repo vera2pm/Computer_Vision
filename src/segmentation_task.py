@@ -31,15 +31,14 @@ def main():
     print("prepare dataset")
     # prepare torch dataset
     transformers = [
-        A.Resize(256, 256),
+        A.Resize(512, 512),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.GaussianBlur(3),
-        A.RandomResizedCrop(IMAGE_SIZE),
         ToTensorV2(transpose_mask=True),
     ]
     transformers = A.Compose(transformers)
-    data_module = SegmentationDataModule(train_path, test_path, train_files, test_files, transformers, 20)
+    data_module = SegmentationDataModule(train_path, test_path, train_files, test_files, transformers, 15)
 
     model = UNet(in_channels=SegmentationDataset.in_channels, out_channels=SegmentationDataset.out_channels)
 
@@ -48,7 +47,9 @@ def main():
 
     logger = TensorBoardLogger("../logs/", name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath=f"../logs/{model_name}/", save_top_k=1, monitor="val_loss")
-    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=200, logger=logger, callbacks=[checkpoint_callback])
+    trainer = L.Trainer(
+        accelerator=dev, devices=1, max_epochs=100, logger=logger, callbacks=[checkpoint_callback], precision="16-mixed"
+    )
 
     learning = Segmentation(model, learning_rate=1.0e-5, weight_decay=0.1)
     trainer.fit(model=learning, datamodule=data_module)

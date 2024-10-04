@@ -57,7 +57,8 @@ class SegmentationDataset(torch.utils.data.Dataset):
             mask_tensor = transformed["mask"]
 
         mask_tensor = mask_tensor.unsqueeze(0)
-        image_tensor = image_tensor.float()
+        mask_tensor = mask_tensor.float() / 255  # normalize image from 0-255 to 0-1 for dice loss
+        image_tensor = image_tensor.float() / 255
 
         # image_tensor = transforms.ToTensor()(image)
         # mask_tensor = transforms.ToTensor()(mask)
@@ -135,7 +136,6 @@ class Segmentation(L.LightningModule):
         images, masks_true, n_blobs = data
         masks_pred = self.model(images)
         loss = self.dsc_loss(masks_pred, masks_true)
-
         return loss
 
     def training_step(self, batch):
@@ -158,7 +158,7 @@ class Segmentation(L.LightningModule):
         n_blob_pred = []
         for i, mask in enumerate(masks_pred):
             mask = mask.transpose(1, 2, 0)
-            mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)
+            mask = cv2.cvtColor(np.float32(mask), cv2.COLOR_RGB2BGR)
             n_blob_pred.append(blob_detection(mask, i))
         n_blobs = n_blobs.to(torch.device("cpu")).detach().numpy()
 
@@ -177,6 +177,6 @@ class Segmentation(L.LightningModule):
         n_blob_pred = []
         for i, mask in enumerate(masks_pred):
             mask = mask.transpose(1, 2, 0)
-            mask = cv2.cvtColor(mask, cv2.COLOR_RGB2BGR)  # blob detection needs BGR, when mask is in RGB
+            mask = cv2.cvtColor(np.float32(mask), cv2.COLOR_RGB2BGR)  # blob detection needs BGR, when mask is in RGB
             n_blob_pred.append(blob_detection(mask, i))
         return n_blob_pred
