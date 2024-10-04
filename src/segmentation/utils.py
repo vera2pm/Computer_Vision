@@ -4,7 +4,9 @@ import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.spatial import cKDTree
+import sys
 
+sys.path.append("../")
 from src.configs.segment_config import train_path, test_path, train_labels_file, test_labels_file
 from src.utils import cv2_load2rgb
 
@@ -60,10 +62,6 @@ def create_targets(images_dict_file, img_dir):
         json.dump(loaded_target_amount, f)
 
 
-def save_loss_summary(loss_list):
-    max(loss_list)
-
-
 def check_size(amount_dict_file, img_dir):
     with open(amount_dict_file) as f:
         amount_dict = json.load(f)
@@ -80,7 +78,24 @@ def check_size(amount_dict_file, img_dir):
     print(f"max sizes: {np.max(widths)}, {np.max(heights)}")
 
 
+def preprocess(images_dict_file):
+    with open(images_dict_file) as f:
+        loaded_target_amount = json.load(f)
+
+    empty = []
+    for img, amount in loaded_target_amount.items():
+        if amount == 0:
+            empty.append(img)
+    print(len(empty))
+    for img in empty:
+        loaded_target_amount.pop(img, None)
+
+    with open(images_dict_file, "w") as f:
+        json.dump(loaded_target_amount, f)
+
+
 if __name__ == "__main__":
-    create_targets(test_labels_file, test_path)
-    create_targets(train_labels_file, train_path)
+    # create_targets(test_labels_file, test_path)
+    # create_targets(train_labels_file, train_path)
     # check_size(train_files, "../../data/segmentation_dataset/train_data/")
+    preprocess("../../data/segmentation_dataset/train_data/target_amount.json")
