@@ -9,20 +9,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch.loggers import TensorBoardLogger
+from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 from torch.utils.data import random_split
 import torch.optim as optim
 import torchvision.models.detection.backbone_utils
 from torchvision import transforms
 from PIL import Image
 from sklearn.metrics import accuracy_score
+from online_triplet_loss.losses import batch_hard_triplet_loss
 
 from torchvision.models import ResNet18_Weights
 from tqdm import tqdm
-from sklearn.decomposition import PCA
 import lightning as L
 from lightning.pytorch.callbacks import ModelCheckpoint
+import sys
 
-
+sys.path.append("../")
+from src.metric_learning.sampler import PKSampler
 from src.utils import get_device
 
 data_path = "../data/Stanford_Online_Products/"
@@ -33,17 +36,16 @@ def load_image(image_path):
     return image
 
 
-def print_embeddings(all_embeddings, all_labels):
-    # Reduce to 2D using PCA
-    pca = PCA(n_components=2)
-    embeddings_2d = pca.fit_transform(all_embeddings)
+class TripletMarginLoss(nn.Module):
+    def __init__(self, margin=1.0, p=2.0):
+        super().__init__()
+        self.margin = margin
+        self.p = p
 
-    # Plot the 2D embeddings
-    plt.figure(figsize=(10, 10))
-    scatter = plt.scatter(embeddings_2d[:, 0], embeddings_2d[:, 1], c=all_labels, cmap="tab10")
-    plt.colorbar(scatter)
-    plt.title("PCA of Embeddings")
-    plt.savefig(f"../pca_embeddings.jpg")
+        self.loss_fn = batch_hard_triplet_loss
+
+    def forward(self, embeddings, labels):
+        return self.loss_fn(labels, embeddings, self.margin, self.p)
 
 
 class TripletDataset(torch.utils.data.Dataset):
@@ -57,6 +59,7 @@ class TripletDataset(torch.utils.data.Dataset):
         self.is_train = is_train
         self.transform = transforms.Compose(transform)
         self.is_super_label = is_super_label
+        self.target = self.super_label if self.is_super_label else self.label
 
     def __getitem__(self, idx):
         image = load_image(self.imgs[idx])
@@ -90,36 +93,91 @@ class TripletDataset(torch.utils.data.Dataset):
         return len(self.imgs)
 
 
-class ResnetTriplet(nn.Module):
-    def __init__(self):
+class TripletDataModule(L.LightningDataModule):
+    def __init__(
+        self,
+        train_path,
+        valid_path,
+        test_path,
+        transformers,
+        labels_per_batch: int,
+        samples_per_label: int,
+        is_super_label: bool,
+        online_sample: bool,
+    ):
         super().__init__()
-        self.resnet = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
-        num_filters = self.resnet.fc.in_features
-        self.resnet.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
+        self.train_path = train_path
+        self.valid_path = valid_path
+        self.test_path = test_path
+        self.p = labels_per_batch
+        self.k = samples_per_label
+        self.batch_size = self.p * self.k
+        self.transformers = transformers
+        self.is_super_label = is_super_label
+        self.online_sample = online_sample
 
-    def forward(self, x):
-        features = self.resnet(x)
-        features = F.normalize(features, p=2, dim=1)
-        return features
+    def setup(self, stage: str) -> None:
+        if stage == "fit":
+            self.train_data_ds = TripletDataset(
+                self.train_path, is_train=False, transform=self.transformers, is_super_label=self.is_super_label
+            )
+
+            self.valid_data_ds = TripletDataset(
+                self.valid_path, is_train=False, transform=self.transformers, is_super_label=self.is_super_label
+            )
+
+        if stage == "predict":
+            self.test_data_ds = TripletDataset(
+                self.test_path, is_train=False, transform=self.transformers, is_super_label=self.is_super_label
+            )
+
+    def train_dataloader(self) -> TRAIN_DATALOADERS:
+        sampler = PKSampler(self.train_data_ds.target, self.p, self.k) if self.online_sample else None
+        return torch.utils.data.DataLoader(
+            self.train_data_ds,
+            batch_size=self.batch_size,
+            # shuffle=True,
+            num_workers=7,
+            persistent_workers=True,
+            sampler=sampler,
+        )
+
+    def val_dataloader(self) -> EVAL_DATALOADERS:
+        sampler = PKSampler(self.valid_data_ds.target, self.p, self.k) if self.online_sample else None
+        return torch.utils.data.DataLoader(
+            self.valid_data_ds,
+            batch_size=self.batch_size,
+            # shuffle=False,
+            num_workers=7,
+            persistent_workers=True,
+            sampler=sampler,
+        )
+
+    def predict_dataloader(self) -> EVAL_DATALOADERS:
+        return torch.utils.data.DataLoader(
+            self.test_data_ds,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=7,
+            persistent_workers=True,
+        )
 
 
 class LitMetricLearning(L.LightningModule):
-    def __init__(self, learning_rate, weight_decay):
+    def __init__(self, learning_rate, weight_decay, online_sample=True):
         super().__init__()
-        # self.model_path = f"../{model_name}.pt"
-        # if os.path.exists(self.model_path):
-        #     print("Load existing model")
-        #     self.model = torch.load(self.model_path)
-        # else:
-        #     print("Train new model")
+
         self.model = torchvision.models.resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
         num_filters = self.model.fc.in_features
         self.model.fc = nn.Sequential(nn.Linear(num_filters, 512), nn.ReLU(), nn.Linear(512, 128))
-        self.save_hyperparameters(ignore=["model"])
+        self.save_hyperparameters()  # ignore=["model"])
         self.learning_rate = learning_rate
         self.weight_decay = weight_decay
-
-        self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
+        self.online_sample = online_sample
+        if self.online_sample:
+            self.triplet_loss_online = TripletMarginLoss(margin=1.0)
+        else:
+            self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
 
     def forward(self, x):
         features = self.model(x)
@@ -131,19 +189,18 @@ class LitMetricLearning(L.LightningModule):
         return optimizer
 
     def _calculate_loss_per_batch(self, data):
-        anchor_img, anchor_label, positive_img, negative_img = data
-        anchor_img, anchor_label, positive_img, negative_img = (
-            anchor_img.to(self.device),
-            anchor_label.to(self.device),
-            positive_img.to(self.device),
-            negative_img.to(self.device),
-        )
+        if self.online_sample:
+            anchor_img, anchor_label = data
+            anchor_img_emb = self.model(anchor_img)
+            loss = self.triplet_loss_online(anchor_img_emb, anchor_label)
+        else:
+            anchor_img, anchor_label, positive_img, negative_img = data
 
-        anchor_img_emb = self.model(anchor_img)
-        positive_img_emb = self.model(positive_img)
-        negative_img_emb = self.model(negative_img)
+            anchor_img_emb = self.model(anchor_img)
+            positive_img_emb = self.model(positive_img)
+            negative_img_emb = self.model(negative_img)
 
-        loss = self.triplet_loss(anchor_img_emb, positive_img_emb, negative_img_emb)
+            loss = self.triplet_loss(anchor_img_emb, positive_img_emb, negative_img_emb)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -166,48 +223,27 @@ class LitMetricLearning(L.LightningModule):
 def find_similar_items(predictions_labels, model):
     true_labels = []
     predictions = []
+    images = []
     for preds, test_labels in tqdm(predictions_labels):
         predictions.append(preds)
         true_labels.append(test_labels)
 
     predictions = torch.cat(predictions, dim=0)
     true_labels = torch.cat(true_labels, dim=0).to(torch.device("cpu")).detach().numpy()
+    tensorboard_logger = model.logger.experiment
 
     pred_labels = []
     for i, pred in tqdm(enumerate(predictions)):
-        distances = model.triplet_loss.distance_function(pred, predictions).to(torch.device("cpu")).detach().numpy()
+        distances = nn.PairwiseDistance()(pred, predictions).to(torch.device("cpu")).detach().numpy()
         pred_im_idx = np.argsort(distances)[1]
         pred_labels.append(np.take(true_labels, pred_im_idx))
+        # if i%10 == 0:
+        #     tensorboard_logger.add_image("anchor_preds", images[i], i)
+        #     tensorboard_logger.add_image("predict_preds", images[pred_im_idx], i)
 
     print(accuracy_score(true_labels, pred_labels))
     print(true_labels[:10])
     print(pred_labels[:10])
-
-
-def load_data():
-    train_data = f"{data_path}Ebay_train_train_preproc.csv"
-    valid_data = f"{data_path}Ebay_train__val_preproc.csv"
-    train_full_data = f"{data_path}Ebay_train_preproc.csv"
-    test_data = f"{data_path}Ebay_test_preproc.csv"
-    transformers = [
-        transforms.Resize((224, 224)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ToTensor(),
-    ]
-
-    train_data_ds = TripletDataset(train_data, is_train=True, transform=transformers, is_super_label=True)
-    train_loader = torch.utils.data.DataLoader(train_data_ds, batch_size=56, num_workers=7, shuffle=True)
-
-    valid_data_ds = TripletDataset(valid_data, is_train=True, transform=transformers, is_super_label=True)
-    valid_loader = torch.utils.data.DataLoader(valid_data_ds, batch_size=56, num_workers=7, shuffle=False)
-
-    train_full_data_ds = TripletDataset(train_full_data, is_train=True, transform=transformers, is_super_label=True)
-    train_full_loader = torch.utils.data.DataLoader(train_full_data_ds, batch_size=56, num_workers=7, shuffle=True)
-
-    test_data_ds = TripletDataset(test_data, is_train=False, transform=transformers, is_super_label=True)
-    test_loader = torch.utils.data.DataLoader(test_data_ds, batch_size=40, num_workers=7)
-
-    return train_loader, valid_loader, train_full_loader, test_loader
 
 
 def plot_loss(train_loss_list, valid_loss_list, model_name):
@@ -224,17 +260,31 @@ def main():
     dev = get_device()
 
     # get data
-    train_loader, valid_loader, train_full_loader, test_loader = load_data()
+    train_path = f"{data_path}Ebay_train_train_preproc.csv"
+    valid_path = f"{data_path}Ebay_train__val_preproc.csv"
+    train_full_data = f"{data_path}Ebay_train_preproc.csv"
+    test_path = f"{data_path}Ebay_test_preproc.csv"
+    transformers = [
+        transforms.Resize((512, 512)),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+    ]
+    data_module = TripletDataModule(
+        train_path, valid_path, test_path, transformers, 4, 10, is_super_label=True, online_sample=True
+    )
 
-    checkpoint_callback = ModelCheckpoint(dirpath="../logs/", save_top_k=1, monitor="val_loss")
-    logger = TensorBoardLogger("../", name="logs")
-    trainer = L.Trainer(accelerator=dev, devices=1, max_epochs=10, logger=logger, callbacks=[checkpoint_callback])
+    model_name = "Similarity"
+    checkpoint_callback = ModelCheckpoint(dirpath=f"../logs/{model_name}", save_top_k=1, monitor="val_loss")
+    logger = TensorBoardLogger("../logs/", name=model_name)
+    trainer = L.Trainer(
+        accelerator=dev, devices=1, max_epochs=150, logger=logger, callbacks=[checkpoint_callback], precision="16-mixed"
+    )
 
-    learning = LitMetricLearning(learning_rate=1e-5, weight_decay=0.1)
-    trainer.fit(model=learning, train_dataloaders=train_loader, val_dataloaders=valid_loader)
+    learning = LitMetricLearning(learning_rate=1e-7, weight_decay=0.1, online_sample=True)
+    trainer.fit(model=learning, datamodule=data_module, ckpt_path="../logs/epoch=98-step=92465.ckpt")
 
     learning = LitMetricLearning.load_from_checkpoint(checkpoint_callback.best_model_path)
-    predictions = trainer.predict(learning, dataloaders=test_loader)
+    predictions = trainer.predict(learning, datamodule=data_module)
     find_similar_items(predictions, learning)
 
 
