@@ -95,7 +95,7 @@ def preprocess(images_dict_file):
 
 
 if __name__ == "__main__":
-    # create_targets(test_labels_file, test_path)
-    # create_targets(train_labels_file, train_path)
+    create_targets(test_labels_file, test_path)
+    create_targets(train_labels_file, train_path)
     # check_size(train_files, "../../data/segmentation_dataset/train_data/")
-    preprocess("../../data/segmentation_dataset/train_data/target_amount.json")
+    preprocess("../data/segmentation_dataset/train_data/target_amount.json")

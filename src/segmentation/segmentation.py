@@ -3,10 +3,10 @@ import json
 import cv2
 import numpy as np
 from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
 import lightning as L
 from lightning.pytorch.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 import torch
 import torch.optim as optim
 from torchmetrics.detection import MeanAveragePrecision
@@ -38,7 +38,12 @@ class SegmentationDataset(torch.utils.data.Dataset):
     out_channels = OUT_CHANNELS
 
     def __init__(self, imgs: list, mask: list, n_blobs: list, transforms=None):
-        self.transforms = transforms
+        basic_transformers = [A.Resize(512, 512), ToTensorV2(transpose_mask=True)]
+        if transforms is None:
+            self.transforms = A.Compose(basic_transformers)
+        else:
+            transforms.extend(basic_transformers)
+            self.transforms = A.Compose(transforms)
         self.imgs = imgs
         self.mask = mask
         self.n_blobs = n_blobs
@@ -96,9 +101,7 @@ class SegmentationDataModule(L.LightningDataModule):
             loaded_images_test, loaded_target_regions_test, test_target_amount = load_images(
                 self.test_files, self.test_path
             )
-            self.test_data = SegmentationDataset(
-                loaded_images_test, loaded_target_regions_test, test_target_amount, self.transformers
-            )
+            self.test_data = SegmentationDataset(loaded_images_test, loaded_target_regions_test, test_target_amount)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         return torch.utils.data.DataLoader(

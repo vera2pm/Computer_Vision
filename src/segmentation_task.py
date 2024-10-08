@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
 import albumentations as A
-from albumentations.pytorch import ToTensorV2
 import sys
 
 sys.path.append("../")
@@ -31,13 +30,10 @@ def main():
     print("prepare dataset")
     # prepare torch dataset
     transformers = [
-        A.Resize(512, 512),
         A.HorizontalFlip(p=0.5),
         A.VerticalFlip(p=0.5),
         A.GaussianBlur(3),
-        ToTensorV2(transpose_mask=True),
     ]
-    transformers = A.Compose(transformers)
     data_module = SegmentationDataModule(train_path, test_path, train_files, test_files, transformers, 15)
 
     model = UNet(in_channels=SegmentationDataset.in_channels, out_channels=SegmentationDataset.out_channels)
@@ -48,7 +44,7 @@ def main():
     logger = TensorBoardLogger("../logs/", name=model_name)
     checkpoint_callback = ModelCheckpoint(dirpath=f"../logs/{model_name}/", save_top_k=1, monitor="val_loss")
     trainer = L.Trainer(
-        accelerator=dev, devices=1, max_epochs=100, logger=logger, callbacks=[checkpoint_callback], precision="16-mixed"
+        accelerator=dev, devices=1, max_epochs=300, logger=logger, callbacks=[checkpoint_callback], precision="16-mixed"
     )
 
     learning = Segmentation(model, learning_rate=1.0e-5, weight_decay=0.1)
