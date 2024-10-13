@@ -16,7 +16,6 @@ import torchvision.models.detection.backbone_utils
 from torchvision import transforms
 from PIL import Image
 from sklearn.metrics import accuracy_score
-from online_triplet_loss.losses import batch_hard_triplet_loss
 
 from torchvision.models import ResNet18_Weights
 from tqdm import tqdm
@@ -25,7 +24,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import sys
 
 sys.path.append("../")
-from src.metric_learning.sampler import PKSampler
+from src.metric_learning.sampler import PKSampler, batch_hard_triplet_loss
 from src.utils import get_device
 
 data_path = "../data/Stanford_Online_Products/"
@@ -176,8 +175,10 @@ class LitMetricLearning(L.LightningModule):
         self.online_sample = online_sample
         if self.online_sample:
             self.triplet_loss_online = TripletMarginLoss(margin=1.0)
+            self.distance_function = torch.cdist
         else:
             self.triplet_loss = nn.TripletMarginWithDistanceLoss(margin=1.0, swap=True)
+            self.distance_function = self.triplet_loss.distance_function
 
     def forward(self, x):
         features = self.model(x)
@@ -228,14 +229,14 @@ def find_similar_items(predictions_labels, model):
         predictions.append(preds)
         true_labels.append(test_labels)
 
-    predictions = torch.cat(predictions, dim=0)
+    predictions = torch.cat(predictions, dim=0).float()
     true_labels = torch.cat(true_labels, dim=0).to(torch.device("cpu")).detach().numpy()
     tensorboard_logger = model.logger.experiment
 
     pred_labels = []
     for i, pred in tqdm(enumerate(predictions)):
-        distances = nn.PairwiseDistance()(pred, predictions).to(torch.device("cpu")).detach().numpy()
-        pred_im_idx = np.argsort(distances)[1]
+        distances = model.distance_function(pred.unsqueeze(0), predictions).to(torch.device("cpu")).detach().numpy()
+        pred_im_idx = np.argsort(distances[0])[1]
         pred_labels.append(np.take(true_labels, pred_im_idx))
         # if i%10 == 0:
         #     tensorboard_logger.add_image("anchor_preds", images[i], i)
@@ -262,7 +263,6 @@ def main():
     # get data
     train_path = f"{data_path}Ebay_train_train_preproc.csv"
     valid_path = f"{data_path}Ebay_train__val_preproc.csv"
-    train_full_data = f"{data_path}Ebay_train_preproc.csv"
     test_path = f"{data_path}Ebay_test_preproc.csv"
     transformers = [
         transforms.Resize((512, 512)),
@@ -281,7 +281,7 @@ def main():
     )
 
     learning = LitMetricLearning(learning_rate=1e-7, weight_decay=0.1, online_sample=True)
-    trainer.fit(model=learning, datamodule=data_module, ckpt_path="../logs/epoch=98-step=92465.ckpt")
+    trainer.fit(model=learning, datamodule=data_module)
 
     learning = LitMetricLearning.load_from_checkpoint(checkpoint_callback.best_model_path)
     predictions = trainer.predict(learning, datamodule=data_module)
