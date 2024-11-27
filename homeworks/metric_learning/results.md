@@ -24,3 +24,10 @@ When I added online sampling, i.e. during training the farthest positive and the
    - 1 epoch - **Top1** = 39% 
    - 83 epoch - **Top1** = 28%
 
+## OpenAI Clip
+As an experiment I tried pretrained model Clip from OpenAI.
+
+Metrics on test dataset:
+**Top1** = 90% 
+
+The best result!

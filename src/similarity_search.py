@@ -5,12 +5,13 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 
+import clip
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-from torch.utils.data import random_split
+from torch.utils.data import random_split, DataLoader
 import torch.optim as optim
 import torchvision.models.detection.backbone_utils
 from torchvision import transforms
@@ -56,7 +57,7 @@ class TripletDataset(torch.utils.data.Dataset):
         self.label = self.data_table["class_id"]
         self.super_label = self.data_table["super_class_id"]
         self.is_train = is_train
-        self.transform = transforms.Compose(transform)
+        self.transform = transform
         self.is_super_label = is_super_label
         self.target = self.super_label if self.is_super_label else self.label
 
@@ -221,7 +222,7 @@ class LitMetricLearning(L.LightningModule):
         return test_embs, test_labels
 
 
-def find_similar_items(predictions_labels, model):
+def find_similar_items(predictions_labels, distance_function, logger=None):
     true_labels = []
     predictions = []
     images = []
@@ -231,11 +232,11 @@ def find_similar_items(predictions_labels, model):
 
     predictions = torch.cat(predictions, dim=0).float()
     true_labels = torch.cat(true_labels, dim=0).to(torch.device("cpu")).detach().numpy()
-    tensorboard_logger = model.logger.experiment
+    # tensorboard_logger = logger
 
     pred_labels = []
     for i, pred in tqdm(enumerate(predictions)):
-        distances = model.distance_function(pred.unsqueeze(0), predictions).to(torch.device("cpu")).detach().numpy()
+        distances = distance_function(pred.unsqueeze(0), predictions).to(torch.device("cpu")).detach().numpy()
         pred_im_idx = np.argsort(distances[0])[1]
         pred_labels.append(np.take(true_labels, pred_im_idx))
         # if i%10 == 0:
@@ -264,11 +265,13 @@ def main():
     train_path = f"{data_path}Ebay_train_train_preproc.csv"
     valid_path = f"{data_path}Ebay_train__val_preproc.csv"
     test_path = f"{data_path}Ebay_test_preproc.csv"
-    transformers = [
-        transforms.Resize((512, 512)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ToTensor(),
-    ]
+    transformers = transforms.Compose(
+        [
+            transforms.Resize((512, 512)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+        ]
+    )
     data_module = TripletDataModule(
         train_path, valid_path, test_path, transformers, 4, 10, is_super_label=True, online_sample=True
     )
@@ -285,8 +288,37 @@ def main():
 
     learning = LitMetricLearning.load_from_checkpoint(checkpoint_callback.best_model_path)
     predictions = trainer.predict(learning, datamodule=data_module)
-    find_similar_items(predictions, learning)
+    find_similar_items(predictions, learning.distance_function)
+
+
+def predict_clip(dataset, model, dev):
+    predictions_labels = []
+
+    with torch.no_grad():
+        for images, labels in tqdm(DataLoader(dataset, batch_size=20)):
+            features = model.encode_image(images.to(dev))
+
+            predictions_labels.append(tuple([features, labels]))
+
+    return predictions_labels
+
+
+def main_clip():
+    dev = get_device()
+    model, preprocess = clip.load("ViT-B/32", dev)
+
+    # get data
+    # train_path = f"{data_path}Ebay_train_train_preproc.csv"
+    # valid_path = f"{data_path}Ebay_train__val_preproc.csv"
+    test_path = f"{data_path}Ebay_test_preproc.csv"
+    test_data_ds = TripletDataset(test_path, is_train=False, transform=preprocess, is_super_label=True)
+
+    # get embeddings and true labels
+    predictions_labels = predict_clip(test_data_ds, model, dev)
+
+    find_similar_items(predictions_labels, torch.cdist)
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    main_clip()
