@@ -6,7 +6,7 @@ from torch.utils.data import random_split
 from torchvision.models.feature_extraction import get_graph_node_names
 import sys
 
-sys.path.append('../')
+sys.path.append("../")
 
 from src.classification_models.knn_classification import KnnClassificate
 from src.utils import get_device
@@ -128,7 +128,10 @@ class Classification(L.LightningModule):
 
         _, predicted_labels = torch.max(output.data, 1)
 
-        true_labels, predicted_labels = true_labels.to(torch.device("cpu")).detach().numpy(), predicted_labels.to(torch.device("cpu")).detach().numpy()
+        true_labels, predicted_labels = (
+            true_labels.to(torch.device("cpu")).detach().numpy(),
+            predicted_labels.to(torch.device("cpu")).detach().numpy(),
+        )
         accur = accuracy_score(true_labels, predicted_labels)
         precision = precision_score(true_labels, predicted_labels, average="macro")
         recall = recall_score(true_labels, predicted_labels, average="macro")
