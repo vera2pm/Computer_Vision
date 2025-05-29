@@ -1,8 +1,8 @@
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
+# import albumentations as A
+# from albumentations.pytorch import ToTensorV2
 import numpy as np
 import os
 from sahi.annotation import BoundingBox, Mask
@@ -116,8 +116,8 @@ class Preparation:
 
 
 def train_detector(data_path=f"../mot20.yaml"):
-    model = YOLO("yolo11n.pt")
-    results = model.train(data=data_path, epochs=2, device="mps", batch=8)
+    model = YOLO("yolo11s.pt")
+    results = model.train(data=data_path, epochs=2, device="mps", batch=8, lr0=0.01)  # imgsz=(1024, 880))
     print(results)
     path = model.export()
     print(f"Model exported to {path}")

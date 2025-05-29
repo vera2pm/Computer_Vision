@@ -14,7 +14,7 @@ sys.path.append("../")
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from boxmot import BotSort
 from ultralytics import YOLO
-from ultralytics.utils.ops import xyxy2ltwh, xywh2ltwh
+from ultralytics.utils.ops import xyxy2ltwh, xywh2ltwh, ltwh2xywh
 from sahi.predict import get_sliced_prediction
 from sahi import AutoDetectionModel
 import fiftyone as fo
@@ -30,7 +30,7 @@ download_yolo11n_model(model_path)
 
 
 def create_videos():
-    for movi in ["MOT20/train/MOT20-03/"]:  # "MOT20/train/MOT20-05/", "MOT20/test/MOT20-06/",
+    for movi in ["MOT20/train/MOT20-01/"]:  # "MOT20/train/MOT20-05/", "MOT20/test/MOT20-06/",
         print(movi)
         mov_in = os.path.join(root_folder, movi, f"img1/%06d.jpg")
         name = movi.split("/")[2]
@@ -44,6 +44,29 @@ def create_videos():
 
 GT_COLUMNS = ["frame", "id", "x0", "y0", "w", "h", "flag", "class", "visibility"]
 GT_CLASSES = ["na", "person", "na", "na", "na", "na", "vehicle", "person", "na", "na", "na", "occluded", "na", "crowd"]
+
+
+def save_labels_from_sample(sample):
+    # for sample in dataset[:1]:
+    # Match image filename root
+    video_stem = os.path.splitext(os.path.basename(sample.filepath))[0]
+    print(video_stem)
+    os.makedirs(f"../data/train_mot20/{video_stem}/labels")
+
+    for i in range(len(sample.frames)):
+        frame_number = i + 1
+        f = sample.frames[frame_number]
+        output_file = open(f"../data/train_mot20/{video_stem}/labels/{frame_number:06d}.txt", "w")
+        for det in f.gt.detections:
+            label = det.label  # string
+            class_id = 0  # adjust this based on label if multi-class
+            ltwhn = np.array(det.bounding_box)
+            # print(label)
+
+            # Convert from [x, y, w, h] (normalized) to YOLO [x_center, y_center, w, h]
+            xc, yc, w, h = list(ltwh2xywh(ltwhn))
+            output_file.write(f"{class_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}\n")
+        output_file.close()
 
 
 def add_ground_truth():
@@ -106,10 +129,11 @@ def tracking_with_sliced_prediction(view):
     )
     # tracker = DeepSort(max_age=5, embedder="clip_ViT-B/32")
     # tracker.device = "mps"
-    tracker = BotSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device="mps", half=False)
+    tracker = BotSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device="mps", half=True)
 
     for i, frame_obj in tqdm(enumerate(frames), total=len(frames)):
         f = view.first().frames[i + 1]
+        print(len(f.gt.detections))
         try:
             if f.bot_sort is None:
                 f.bot_sort = fo.Detections()
@@ -120,8 +144,8 @@ def tracking_with_sliced_prediction(view):
         results = get_sliced_prediction(
             frame_obj.filepath,
             detection_model=object_detector,
-            slice_height=640,
-            slice_width=640,
+            slice_height=320,
+            slice_width=320,
             overlap_height_ratio=0.2,
             overlap_width_ratio=0.2,
         )
@@ -135,6 +159,7 @@ def tracking_with_sliced_prediction(view):
             xyxy = np.array(res.bbox.to_xyxy())
             bbs.append([*xyxy, res.score.value, res.category.id])
         bbs = np.array(bbs)
+        print(len(bbs))
 
         frame = cv2.imread(frame_obj.filepath)
         tracks = tracker.update(bbs, frame)
@@ -159,45 +184,57 @@ def tracking_with_sliced_prediction(view):
             f.save()
 
 
-def tracking_yolo(view):
+def tracking_yolo(view, model, tag):
     mov_path = view.first().filepath
-    model = YOLO("yolo11n.pt")
-    results = model.track(mov_path, device="mps")
+    results = model.track(mov_path, device="mps", stream=True, imgsz=1280, conf=0.4)
 
-    for frm, res in tqdm(enumerate(results)):
+    for frm, res in tqdm(enumerate(results), total=len(view.first().frames)):
         f = view.first().frames[frm + 1]
-        f.yolo11 = fo.Detections()
         try:
-            if f.yolo11 is None:
-                f.yolo11 = fo.Detections()
+            f[tag] = fo.Detections()
         except AttributeError:
-            f["yolo11"] = fo.Detections()
+            f[tag] = fo.Detections()
 
-        is_person = res.boxes.cls.numpy() == 0
+        is_person = res.boxes.cls.cpu().numpy() == 0
         for bb, id, conf in zip(
-            res.boxes.xyxyn.numpy()[is_person], res.boxes.id.numpy()[is_person], res.boxes.conf.numpy()[is_person]
+            res.boxes.xyxyn.cpu().numpy()[is_person],
+            res.boxes.id.cpu().numpy()[is_person],
+            res.boxes.conf.cpu().numpy()[is_person],
         ):
             bb = xyxy2ltwh(bb)
             det = fo.Detection(label="person", bounding_box=bb, index=id, confidence=conf)
-            f.yolo11.detections.append(det)
+            f[tag].detections.append(det)
             f.save()
 
 
-def save_results(dataset_or_view):
+def save_results(dataset_or_view, tag):
     # The directory to which to write the annotated media
-    output_dir = mv_dir + "_result_deepsort"
+    output_dir = mv_dir + "_result_" + tag
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
 
     # The list of `Label` fields containing the labels that you wish to render on
     # the source media (e.g., classifications or detections)
-    label_fields = ["frames.deep_sort"]  # for example
+    label_fields = [f"frames.{tag}"]
 
     # Render the labels!
     dataset_or_view.draw_labels(output_dir, label_fields=label_fields)
 
 
-# def eval_map():
-#     metric = MeanAveragePrecision(iou_type="bbox")
-#     metric = metric(predictions, targets)
+def main():
+    # create_dataset()
+    # add_ground_truth()
+
+    dataset = fo.load_dataset("mot20")
+    # save_labels_from_sample(dataset.last())
+
+    view = dataset[1:2]
+    # model = YOLO("yolo11s.pt")  # yolov8s-worldv2.pt  , yolo11s.pt
+    model = YOLO("runs/detect/train/weights/best.pt")
+    tracking_yolo(view, model, "yolo11_trained_10")
+    # tracking_with_sliced_prediction(view)
+
+    save_results(view, "yolo11_trained_10")
 
 
 if __name__ == "__main__":
@@ -205,20 +242,11 @@ if __name__ == "__main__":
     # add_ground_truth()
 
     dataset = fo.load_dataset("mot20")
-
-    view = dataset.skip(1)
-    # tracking_yolo(view)
-    # tracking_with_sliced_prediction(view)
-    # view.export(
-    #     export_dir="../data/Test_export",
-    #     dataset_type=fo.types.YOLOv5Dataset,
-    #     label_field=label_field,
-    #     classes=classes,
-    # )
+    # save_labels_from_sample(dataset.last())
 
     session = fo.launch_app(dataset)
 
     session.wait()
     # print(view.first().filepath)
     # print(view.count)
-    # save_results(dataset)
+    # save_results(view, "yolo11_trained_10")
