@@ -186,7 +186,7 @@ def tracking_with_sliced_prediction(view):
 
 def tracking_yolo(view, model, tag):
     mov_path = view.first().filepath
-    results = model.track(mov_path, device="mps", stream=True, imgsz=1280, conf=0.4)
+    results = model.track(mov_path, device="mps", stream=True, imgsz=1280, conf=0.4, iou=0.3)
 
     for frm, res in tqdm(enumerate(results), total=len(view.first().frames)):
         f = view.first().frames[frm + 1]
@@ -243,6 +243,7 @@ if __name__ == "__main__":
 
     dataset = fo.load_dataset("mot20")
     # save_labels_from_sample(dataset.last())
+    main()
 
     session = fo.launch_app(dataset)
 
