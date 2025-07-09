@@ -7,7 +7,7 @@
 - [    0.49961]
 - array([    0.85122])
 
-![](../../homeworks/tracking/results_train4.png)
+![](results_train4.png)
 
 14 epochs train for Yolo:
 - map50-95 = 0.48745224796724174
@@ -16,4 +16,4 @@
 - maps = [    0.48745]
 - f1: array([    0.82201])
 
-![](../../homeworks/tracking/results.png)
+![](results.png)
