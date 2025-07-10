@@ -1,6 +1,7 @@
 import os
 import sys
-
+import motmetrics as mm
+import numpy as np
 import pandas as pd
 from sahi.utils.ultralytics import download_yolo11n_model
 
@@ -11,19 +12,17 @@ import cv2
 from pathlib import Path
 
 sys.path.append("../")
-from deep_sort_realtime.deepsort_tracker import DeepSort
 from boxmot import BotSort
 from ultralytics import YOLO
-from ultralytics.utils.ops import xyxy2ltwh, xywh2ltwh, ltwh2xywh
+from ultralytics.utils.ops import xyxy2ltwh, ltwh2xywh
 from sahi.predict import get_sliced_prediction
 from sahi import AutoDetectionModel
 import fiftyone as fo
 import fiftyone.utils.video as fouv
-from fiftyone import ViewField as F
 
 print(f"Your FO version is: {fo.__version__}")
 
-root_folder = "../data/"
+root_folder = "./data/"
 mv_dir = os.path.join(root_folder, "mot20_mvs")
 model_path = "models/yolo11n.pt"
 download_yolo11n_model(model_path)
@@ -186,9 +185,11 @@ def tracking_with_sliced_prediction(view):
 
 def tracking_yolo(view, model, tag):
     mov_path = view.first().filepath
-    results = model.track(mov_path, device="mps", stream=True, imgsz=1280, conf=0.4, iou=0.3)
+    results = model.track(mov_path, device="mps", stream=True, imgsz=1280, conf=0.4, iou=0.6)
 
-    for frm, res in tqdm(enumerate(results), total=len(view.first().frames)):
+    for frm, res in tqdm(enumerate(results), total=(len(view.first().frames))):
+        if frm <= 1669:
+            continue
         f = view.first().frames[frm + 1]
         try:
             f[tag] = fo.Detections()
@@ -205,6 +206,35 @@ def tracking_yolo(view, model, tag):
             det = fo.Detection(label="person", bounding_box=bb, index=id, confidence=conf)
             f[tag].detections.append(det)
             f.save()
+
+
+def calc_metrics(view, tag):
+
+    acc = mm.MOTAccumulator(auto_id=True)
+    for frm, res in tqdm(enumerate(view.first().frames), total=len(view.first().frames)):
+        f = view.first().frames[frm + 1]
+
+        gt_ids = []
+        gt_bb = []
+        for d in f.gt.detections:
+            gt_ids.append(d.index)
+            gt_bb.append(d.bounding_box)
+
+        track_ids = []
+        detected_bb = []
+        for d in f[tag].detections:
+            track_ids.append(d.index)
+            detected_bb.append(d.bounding_box)
+
+        distances = mm.distances.iou_matrix(gt_bb, detected_bb, max_iou=0.6)
+
+        acc.update(
+            gt_ids, track_ids, distances  # Ground truth objects in this frame  # Detector hypotheses in this frame
+        )
+
+    mh = mm.metrics.create()
+    summary = mh.compute(acc, metrics=["num_frames", "mota", "motp"], name="acc")
+    print(summary)
 
 
 def save_results(dataset_or_view, tag):
@@ -227,14 +257,15 @@ def main():
 
     dataset = fo.load_dataset("mot20")
     # save_labels_from_sample(dataset.last())
-
-    view = dataset[1:2]
+    tag = "yolo_best_nms"
+    view = dataset[2:3]
     # model = YOLO("yolo11s.pt")  # yolov8s-worldv2.pt  , yolo11s.pt
-    model = YOLO("runs/detect/train/weights/best.pt")
-    tracking_yolo(view, model, "yolo11_trained_10")
+    model = YOLO("tracking/runs/detect/train/weights/best.pt")
+    tracking_yolo(view, model, tag)
+    calc_metrics(view, tag)
     # tracking_with_sliced_prediction(view)
 
-    save_results(view, "yolo11_trained_10")
+    save_results(view, tag)
 
 
 if __name__ == "__main__":
@@ -242,7 +273,6 @@ if __name__ == "__main__":
     # add_ground_truth()
 
     dataset = fo.load_dataset("mot20")
-    # save_labels_from_sample(dataset.last())
     main()
 
     session = fo.launch_app(dataset)
