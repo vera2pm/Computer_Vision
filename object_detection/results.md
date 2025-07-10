@@ -9,7 +9,8 @@
 
 Hyppopotamus and Rhinoceros were chosen as objects.
 
-Dataset was prepared by Roboflow.
+I prepared the Dataset: found images, labeled them with Roboflow, split for train, validation and test. 
+
 ## Model YOLO parameters:
 [opt.yaml](opt.yaml)
 
