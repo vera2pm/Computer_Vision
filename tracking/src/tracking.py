@@ -1,3 +1,5 @@
+import os
+
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 
@@ -115,13 +117,17 @@ class Preparation:
         )
 
 
-def train_detector(data_path=f"../mot20.yaml"):
+def train_detector(
+    data_path="../data/train_mot20/dataset.yaml",
+    epochs: int = 14,
+    device: str = "mps",
+    project: str = "../tracking/runs/detect",
+):
     model = YOLO("yolo11s.pt")
-    results = model.train(data=data_path, epochs=2, device="mps", batch=8, lr0=0.01)  # imgsz=(1024, 880))
-    print(results)
-    path = model.export()
-    print(f"Model exported to {path}")
-    return model
+    model.train(data=data_path, epochs=epochs, device=device, batch=8, lr0=0.01, project=project)
+    weights = os.path.join(project, "train", "weights", "best.pt")
+    print(f"Best weights: {weights}")
+    return weights
 
 
 def xyxy_to_yolo(xyxy, img_w, img_h):
@@ -188,16 +194,14 @@ def main(video, object_detector=None):
 
 if __name__ == "__main__":
     import torch
+    from prepare_data import main as prepare_data
 
     torch.mps.empty_cache()
-    # for path in ["train/MOT20-01", "train/MOT20-02"]:
-    #     Preparation(new_size=(1024, 1024), path=root_folder + path).run()
-    #
-    # for path in ["test/MOT20-04"]:  # , "test/MOT20-06/img1", "test/MOT20-07/img1", "test/MOT20-08/img1"]:
-    #     # label_preparing("./drive/MyDrive/" + path)
-    #     Preparation(new_size=(1024, 1024), path=root_folder + path).image_scale()
+    # Step 1: prepare full dataset (run once before training)
+    # prepare_data()
 
-    obj_detector = train_detector("../data/train_mot20/dataset.yaml")
+    # Step 2: train
+    obj_detector = train_detector("../data/yolo_mot20/dataset.yaml")
     # obj_detector = YOLO("yolo11n.pt")
     obj_detector.export()
     # video = np.sort(os.listdir(folder))
