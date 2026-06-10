@@ -15,7 +15,6 @@ from tqdm import tqdm
 from ultralytics import YOLO
 import cv2
 import pandas as pd
-from src.utils import cv2_load2rgb
 
 root_folder = "../data/MOT20/"
 folder = "../data/MOT20/test/MOT20-04/"

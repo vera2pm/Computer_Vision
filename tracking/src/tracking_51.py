@@ -283,6 +283,25 @@ class Dataset:
         return dataset
 
 
+# ── Training ─────────────────────────────────────────────────────────────────
+
+def train_detector(
+    data_path=None,
+    epochs: int = 14,
+    device: str = "mps",
+    project: str = None,
+):
+    if data_path is None:
+        data_path = os.path.join(out_dir, "dataset.yaml")
+    if project is None:
+        project = os.path.join(os.path.dirname(out_dir), "tracking", "runs", "detect")
+    model = YOLO("yolo11s.pt")
+    model.train(data=data_path, epochs=epochs, device=device, batch=8, lr0=0.01, project=project)
+    weights = os.path.join(project, "train", "weights", "best.pt")
+    print(f"Best weights: {weights}")
+    return weights
+
+
 # ── Tracking ─────────────────────────────────────────────────────────────────
 
 def tracking_yolo(view, model, tag: str, device: str = "mps"):
