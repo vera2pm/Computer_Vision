@@ -1,18 +1,17 @@
 import os
 import shutil
-from pathlib import Path
 
 import cv2
 import motmetrics as mm
 import numpy as np
 import pandas as pd
 import yaml
-from sahi.utils.ultralytics import download_yolo11n_model
 from tqdm import tqdm
 
+import subprocess
+
 import fiftyone as fo
-import fiftyone.utils.video as fouv
-from boxmot import BotSort
+from boxmot import Boxmot
 from sahi import AutoDetectionModel
 from sahi.predict import get_sliced_prediction
 from ultralytics import YOLO
@@ -29,7 +28,7 @@ print(f"Your FO version is: {fo.__version__}")
 #
 DATA_ROOT    = "../data/"
 mot20_folder = os.path.join(DATA_ROOT, "MOT20")
-mv_dir       = os.path.join(DATA_ROOT, "mot20_mvs")
+mv_dir       = os.path.join(DATA_ROOT, "mot20_mvs_new")
 out_dir      = os.path.join(DATA_ROOT, "train_mot20")
 model_path   = "models/yolo11n.pt"
 
@@ -42,12 +41,13 @@ def configure(data_root: str = "../data/", yolo_model: str = "models/yolo11n.pt"
         yolo_model: path to base YOLO weights (downloaded automatically if missing)
     """
     global DATA_ROOT, mot20_folder, mv_dir, out_dir, model_path
-    DATA_ROOT    = data_root
+    DATA_ROOT = data_root
     mot20_folder = os.path.join(data_root, "MOT20")
-    mv_dir       = os.path.join(data_root, "mot20_mvs")
-    out_dir      = os.path.join(data_root, "train_mot20")
-    model_path   = yolo_model
-    download_yolo11n_model(model_path)
+    mv_dir = os.path.join(data_root, "mot20_mvs")
+    out_dir = os.path.join(data_root, "train_mot20")
+    model_path = yolo_model
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
+    YOLO(model_path)  # auto-downloads weights if not present
     print(f"Configured — data_root: {data_root} | model: {yolo_model}")
 
 
@@ -78,6 +78,7 @@ class Dataset:
     def _find_img_dir(seq_path: str) -> str:
         for candidate in ("img1", "images"):
             d = os.path.join(seq_path, candidate)
+            print(d)
             if os.path.isdir(d):
                 return d
         raise FileNotFoundError(f"No image directory found in {seq_path}")
@@ -91,6 +92,7 @@ class Dataset:
 
     def create_videos(self):
         """Convert all MOT20 img1/ sequences to mp4 for FiftyOne."""
+        print("Starting creating videos from images")
         os.makedirs(mv_dir, exist_ok=True)
         seqs = (
             [(s, "train") for s in TRAIN_SEQS + VAL_SEQS + LABELED_TEST_SEQS]
@@ -104,7 +106,10 @@ class Dataset:
             seq_path = os.path.join(mot20_folder, split, seq_name)
             img_dir  = self._find_img_dir(seq_path)
             print(f"  {seq_name}: creating video...")
-            fouv.reencode_video(os.path.join(img_dir, "%06d.jpg"), mov_out, verbose=False)
+            subprocess.run(
+                ["ffmpeg", "-i", os.path.join(img_dir, "%06d.jpg"), "-c:v", "libx264", mov_out],
+                check=True,
+            )
             print(f"  {seq_name}: done")
 
     def create_dataset(self):
@@ -285,7 +290,14 @@ def tracking_with_sliced_prediction(view, device: str = "mps"):
         confidence_threshold=0.3,
         device=device,
     )
-    tracker = BotSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device=device, half=True)
+    # tracker = BotSort(reid_weights=Path("osnet_x0_25_msmt17.pt"), device=device, half=device.startswith("cuda"))
+    tracker = Boxmot(
+        detector="yolov8n.pt",  # specify your detector
+        tracker="botsort",  # use lowercase name here
+        device=device,
+        reid="osnet_x0_25_msmt17",  # optional ReID model
+        half = device.startswith("cuda")
+    )
 
     for i, frame_obj in tqdm(enumerate(frames), total=len(frames)):
         f = view.first().frames[i + 1]
@@ -296,6 +308,8 @@ def tracking_with_sliced_prediction(view, device: str = "mps"):
             slice_height=320, slice_width=320,
             overlap_height_ratio=0.2, overlap_width_ratio=0.2,
         )
+        if not results.object_prediction_list:
+            continue
         bbs = np.array([[*res.bbox.to_xyxy(), res.score.value, res.category.id]
                         for res in results.object_prediction_list])
 
@@ -334,7 +348,7 @@ def calc_metrics(view, tag: str):
 
         acc.update(gt_ids, track_ids, mm.distances.iou_matrix(gt_bb, detected_bb, max_iou=0.6))
 
-    mh      = mm.metrics.create()
+    mh = mm.metrics.create()
     summary = mh.compute(acc, metrics=["num_frames", "mota", "motp"], name="acc")
     print(summary)
     return summary
@@ -352,10 +366,10 @@ def save_results(dataset_or_view, tag: str):
 
 if __name__ == "__main__":
     # Step 1 — prepare data (run once)
-    # configure("../data/")
-    # Dataset().prepare_all()
+    configure("/Users/verakocetkova/Desktop/Data Science/ComputerVision/data/")
+    Dataset().create_videos()
 
     # Steps 2–4 — train, evaluate, visualise (see tracking.ipynb)
-    dataset = fo.load_dataset("mot20")
-    session = fo.launch_app(dataset)
-    session.wait()
+    # dataset = fo.load_dataset("mot20")
+    # session = fo.launch_app(dataset)
+    # session.wait()

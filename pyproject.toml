@@ -1,0 +1,57 @@
+[project]
+name = "computervision"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    # Deep learning
+    "torch>=2.1.0",
+    "torchvision>=0.16.0",
+    "torchaudio>=2.1.0",
+    "lightning>=2.3.0",
+    "pytorch-lightning>=2.3.0",
+    "torchmetrics>=1.1.0",
+    "tensorboard>=2.17.0",
+    # Vision & image processing
+    "opencv-python>=4.6.0",
+    "Pillow>=9.4.0",
+    "scikit-image>=0.21.0",
+    "imageio>=2.31.0",
+    "imgaug>=0.4.0",
+    "albumentations",
+    # Object detection / tracking
+    "ultralytics>=8.3.0",
+    "sahi>=0.11.0",
+    "deep-sort-realtime>=1.3.0",
+    "boxmot>=12.0.0",
+    "pycocotools>=2.0.0",
+    # Metric learning
+    "online-triplet-loss>=0.0.6",
+    # CLIP: install separately via:
+    # uv pip install git+https://github.com/openai/CLIP.git
+    "ftfy",
+    # Data & ML
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "scipy>=1.10.0",
+    "scikit-learn>=1.3.0",
+    "pyarrow>=15.0.0",
+    "shapely>=2.0.0",
+    # Visualization
+    "matplotlib>=3.6.0",
+    "seaborn>=0.12.0",
+    # Utilities
+    "tqdm>=4.65.0",
+    "PyYAML>=6.0",
+    "joblib>=1.3.0",
+    "black>=24.0.0",
+    # Notebooks
+    "jupyterlab>=3.5.0",
+    "ipykernel>=6.15.0",
+    "motmetrics>=1.4.0",
+    "fiftyone>=1.15.0",
+    "setuptools>=81.0.0",
+    "python3-distutils>=0.0.1",
+    "wheel>=0.47.0",
+    "build>=1.5.0",
+    "pip>=26.1.1",
+]
