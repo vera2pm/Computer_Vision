@@ -37,7 +37,9 @@ def configure(data_root: str = "../data/", yolo_model: str = "models/yolo11n.pt"
     """Set the data root and base YOLO model. Call this once before anything else.
 
     Args:
-        data_root:  root folder that contains MOT20/, mot20_mvs/, train_mot20/
+        data_root:  root folder that contains mot20_mvs/ (videos), train_mot20/ (output),
+                and optionally MOT20/ (original frames). If MOT20/ is absent, frames are
+                extracted from videos. gt.txt files are still required in MOT20/train/<seq>/gt/.
         yolo_model: path to base YOLO weights (downloaded automatically if missing)
     """
     global DATA_ROOT, mot20_folder, mv_dir, out_dir, model_path
@@ -160,23 +162,36 @@ class Dataset:
             self.add_ground_truth(sample, "train", seq_name)
 
     def save_labels_and_images(self, sample, split: str, seq_name: str):
-        """Write YOLO label files and copy source images for one sequence."""
+        """Write YOLO label files and extract images from video for one sequence."""
         seq_out = os.path.join(out_dir, split, f"movi_{seq_name}")
         lbl_dir = os.path.join(seq_out, "labels")
         img_out = os.path.join(seq_out, "images")
         os.makedirs(lbl_dir, exist_ok=True)
         os.makedirs(img_out, exist_ok=True)
 
-        img_src = self._find_img_dir(os.path.join(mot20_folder, "train", seq_name))
+        # Extract frames from video if images not already present
+        video_path = os.path.join(mv_dir, f"movi_{seq_name}.mp4")
+        mot20_img_src = os.path.join(mot20_folder, "train", seq_name)
+        use_video = not os.path.isdir(mot20_img_src) and os.path.exists(video_path)
+
+        if use_video:
+            print(f"  {seq_name}: extracting frames from video...")
+            subprocess.run(
+                ["ffmpeg", "-i", video_path, os.path.join(img_out, "%06d.jpg")],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        else:
+            img_src = self._find_img_dir(mot20_img_src)
 
         for i in tqdm(range(len(sample.frames)), desc=f"Export {seq_name}"):
             frame_number = i + 1
             frame_name   = f"{frame_number:06d}"
 
-            src_img = os.path.join(img_src, f"{frame_name}.jpg")
-            if not os.path.exists(src_img):
-                continue
-            shutil.copy2(src_img, os.path.join(img_out, f"{frame_name}.jpg"))
+            if not use_video:
+                src_img = os.path.join(img_src, f"{frame_name}.jpg")
+                if not os.path.exists(src_img):
+                    continue
+                shutil.copy2(src_img, os.path.join(img_out, f"{frame_name}.jpg"))
 
             f = sample.frames[frame_number]
             try:
@@ -204,16 +219,30 @@ class Dataset:
                 self.save_labels_and_images(sample, split, seq_name)
 
     def prepare_test_images(self):
-        """Copy images for no-GT test sequences (inference only)."""
+        """Extract/copy images for no-GT test sequences (inference only)."""
         for seq_name in TEST_SEQS:
-            seq_path = os.path.join(mot20_folder, "test", seq_name)
-            img_src  = self._find_img_dir(seq_path)
-            img_out  = os.path.join(out_dir, "test", f"movi_{seq_name}", "images")
+            img_out = os.path.join(out_dir, "test", f"movi_{seq_name}", "images")
             os.makedirs(img_out, exist_ok=True)
-            for fname in tqdm(sorted(os.listdir(img_src)), desc=f"Test {seq_name}"):
-                if fname.lower().endswith((".jpg", ".jpeg", ".png")):
-                    shutil.copy2(os.path.join(img_src, fname), os.path.join(img_out, fname))
-            print(f"  {seq_name}: images copied to {img_out}")
+
+            mot20_seq_path = os.path.join(mot20_folder, "test", seq_name)
+            video_path     = os.path.join(mv_dir, f"movi_{seq_name}.mp4")
+
+            if os.path.isdir(mot20_seq_path):
+                img_src = self._find_img_dir(mot20_seq_path)
+                for fname in tqdm(sorted(os.listdir(img_src)), desc=f"Test {seq_name}"):
+                    if fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                        shutil.copy2(os.path.join(img_src, fname), os.path.join(img_out, fname))
+            elif os.path.exists(video_path):
+                print(f"  {seq_name}: extracting frames from video...")
+                subprocess.run(
+                    ["ffmpeg", "-i", video_path, os.path.join(img_out, "%06d.jpg")],
+                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+            else:
+                print(f"  {seq_name}: no source found (no MOT20 folder or video), skipping")
+                continue
+
+            print(f"  {seq_name}: images ready at {img_out}")
 
     def write_dataset_yaml(self):
         """Write dataset.yaml for YOLO (train + val only; labeled_test is held out)."""
