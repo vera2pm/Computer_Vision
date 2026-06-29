@@ -25,7 +25,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint
 import sys
 
 sys.path.append("../")
-from src.metric_learning.sampler import PKSampler, batch_hard_triplet_loss
+from metric_learning.src.sampler import PKSampler, batch_hard_triplet_loss
 from src.utils import get_device
 
 data_path = "../data/Stanford_Online_Products/"
