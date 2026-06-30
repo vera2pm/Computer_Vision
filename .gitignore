@@ -4,3 +4,4 @@
 /cvat/
 /data/
 /logs/
+/generative_models/.env
