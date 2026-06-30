@@ -17,10 +17,10 @@ Fine-tune a pretrained text-to-image diffusion model to generate Pokemon-style i
 | Parameter | Value |
 |---|---|
 | Resolution | 512 x 512 |
-| Batch size | 1 |
-| Gradient accumulation steps | 4 (effective batch size = 4) |
+| Batch size | 2 |
+| Gradient accumulation steps | 2 (effective batch size = 4) |
 | Epochs | 50 |
-| Learning rate | 1e-6 |
+| Learning rate | 1e-5 |
 | LoRA rank | 4 |
 | Optimizer | AdamW |
 | Loss | MSE (noise prediction) |

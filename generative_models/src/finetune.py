@@ -34,10 +34,10 @@ DATASET_NAME = "reach-vb/pokemon-blip-captions" # "lambdalabs/pokemon-blip-capti
 OUTPUT_DIR = "../pokemon-lora"
 
 RESOLUTION = 512
-BATCH_SIZE = 1
-GRADIENT_ACCUMULATION_STEPS = 4
+BATCH_SIZE = 2
+GRADIENT_ACCUMULATION_STEPS = 2
 NUM_EPOCHS = 50
-LEARNING_RATE = 1e-6
+LEARNING_RATE = 1e-5
 LORA_RANK = 4
 
 if torch.backends.mps.is_available():
